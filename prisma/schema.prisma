@@ -1,0 +1,63 @@
+// Schema de Prisma para el sistema de chat.
+// Modelo: usuarios, salas, membresia de salas y mensajes (de sala o privados).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  createdRooms   Room[]       @relation("RoomCreator")
+  memberships    RoomMember[]
+  sentMessages   Message[]    @relation("MessageSender")
+  receivedDMs    Message[]    @relation("MessageRecipient")
+}
+
+model Room {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdBy String
+  createdAt DateTime @default(now())
+
+  creator  User         @relation("RoomCreator", fields: [createdBy], references: [id])
+  members  RoomMember[]
+  messages Message[]
+}
+
+model RoomMember {
+  userId   String
+  roomId   String
+  joinedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roomId])
+}
+
+// Un Message es de sala si tiene roomId, o un DM si tiene recipientId.
+model Message {
+  id          String   @id @default(uuid())
+  content     String
+  senderId    String
+  roomId      String?
+  recipientId String?
+  createdAt   DateTime @default(now())
+
+  sender    User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  room      Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  recipient User? @relation("MessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([senderId, recipientId, createdAt])
+}
