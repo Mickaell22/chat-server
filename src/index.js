@@ -1,34 +1,36 @@
-import 'dotenv/config';
 import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import { Server } from 'socket.io';
-
-const PORT = process.env.PORT || 4000;
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+import { env } from './config/env.js';
+import authRoutes from './routes/authRoutes.js';
+import { socketAuth } from './middleware/auth.js';
 
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGIN, credentials: true }));
+app.use(cors({ origin: env.clientOrigin, credentials: true }));
 app.use(express.json());
 
 // Healthcheck (util para Railway y para verificar que el server vive)
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-// TODO (semana 1): montar rutas de auth -> app.use('/api/auth', authRouter)
+app.use('/api/auth', authRoutes);
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: CLIENT_ORIGIN, credentials: true },
+  cors: { origin: env.clientOrigin, credentials: true },
 });
 
-// TODO (semana 1): middleware que valida el JWT en el handshake del socket
+// Valida el JWT en el handshake: nadie entra al chat sin autenticarse.
+io.use(socketAuth);
+
 // TODO (semana 2-3): registrar handlers de chat (salas, DM, usuarios online)
 io.on('connection', (socket) => {
-  console.log(`Socket conectado: ${socket.id}`);
+  const { user } = socket.data;
+  console.log(`Socket conectado: ${socket.id} (usuario: ${user.username})`);
   socket.on('disconnect', () => console.log(`Socket desconectado: ${socket.id}`));
 });
 
-server.listen(PORT, () => {
-  console.log(`Servidor escuchando en http://localhost:${PORT}`);
+server.listen(env.port, () => {
+  console.log(`Servidor escuchando en http://localhost:${env.port}`);
 });
