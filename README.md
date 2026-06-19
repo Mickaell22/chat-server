@@ -141,6 +141,16 @@ cp .env.example .env
 | `JWT_SECRET` | Secreto para firmar los JWT (largo y aleatorio) | `xxxxxxxx...` |
 | `JWT_EXPIRES_IN` | Expiración del token | `7d` |
 | `CLIENT_ORIGIN` | Origen permitido para CORS (URL del cliente) | `http://localhost:5173` |
+| `SMTP_HOST` | Host del servidor SMTP (correos) | `smtp.gmail.com` |
+| `SMTP_PORT` | Puerto SMTP (587 STARTTLS / 465 TLS) | `587` |
+| `SMTP_SECURE` | `true` si el puerto es 465, si no `false` | `false` |
+| `SMTP_USER` | Usuario/cuenta SMTP | `tucuenta@gmail.com` |
+| `SMTP_PASS` | Contraseña o app password SMTP | `xxxx xxxx xxxx xxxx` |
+| `MAIL_FROM` | Remitente visible | `Chat en tiempo real <tucuenta@gmail.com>` |
+
+> Las variables `SMTP_*` son para la verificación de email y la recuperación de
+> contraseña. Con Gmail, usá un **app password** y poné en `MAIL_FROM` la misma
+> dirección de `SMTP_USER` (Gmail fuerza el remitente a la cuenta autenticada).
 
 ---
 
