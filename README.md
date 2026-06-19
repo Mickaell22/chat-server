@@ -196,8 +196,11 @@ que está vivo.
 | Método | Ruta | Descripción | Auth |
 |--------|------|-------------|------|
 | `GET` | `/health` | Estado del servidor | No |
-| `POST` | `/api/auth/register` | Registrar un usuario | No |
+| `POST` | `/api/auth/register` | Registrar un usuario (envía correo de verificación) | No |
 | `POST` | `/api/auth/login` | Iniciar sesión y obtener JWT | No |
+| `POST` | `/api/auth/verify-email` | Verificar el correo con el token recibido | No |
+| `POST` | `/api/auth/request-password-reset` | Solicitar enlace de recuperación por correo | No |
+| `POST` | `/api/auth/reset-password` | Establecer nueva contraseña con el token | No |
 
 > Las rutas de chat se manejan por WebSocket, no por HTTP. _(Endpoints en construcción)._
 
