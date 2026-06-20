@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import { env } from './config/env.js';
 import authRoutes from './routes/authRoutes.js';
 import { socketAuth } from './middleware/auth.js';
+import { registerChatHandlers } from './sockets/chat.js';
 
 const app = express();
 app.use(cors({ origin: env.clientOrigin, credentials: true }));
@@ -24,12 +25,9 @@ const io = new Server(server, {
 // Valida el JWT en el handshake: nadie entra al chat sin autenticarse.
 io.use(socketAuth);
 
-// TODO (semana 2-3): registrar handlers de chat (salas, DM, usuarios online)
-io.on('connection', (socket) => {
-  const { user } = socket.data;
-  console.log(`Socket conectado: ${socket.id} (usuario: ${user.username})`);
-  socket.on('disconnect', () => console.log(`Socket desconectado: ${socket.id}`));
-});
+// Handlers de chat: usuarios online + sala global con persistencia.
+// (salas multiples y DM llegan en incrementos siguientes)
+registerChatHandlers(io);
 
 server.listen(env.port, () => {
   console.log(`Servidor escuchando en http://localhost:${env.port}`);
