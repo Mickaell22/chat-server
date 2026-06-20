@@ -17,12 +17,13 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,30}$/;
 
 // Nunca exponer passwordHash en las respuestas.
-function publicUser(user) {
+export function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
     email: user.email,
     emailVerified: user.emailVerified,
+    avatarUrl: user.avatarUrl,
   };
 }
 

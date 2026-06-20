@@ -21,6 +21,15 @@ const smtp = {
   from: process.env.MAIL_FROM || 'Chat en tiempo real <no-reply@ejemplo.com>',
 };
 
+// Cloudinary es opcional: si faltan credenciales, el endpoint de subida de
+// avatar responde 503 en vez de romper el arranque. El secret vive SOLO aqui
+// (server), nunca llega al cliente.
+const cloudinary = {
+  cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+  apiKey: process.env.CLOUDINARY_API_KEY || '',
+  apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+};
+
 export const env = {
   port: Number(process.env.PORT) || 4000,
   databaseUrl: required('DATABASE_URL'),
@@ -30,4 +39,8 @@ export const env = {
   smtp,
   // Hay envio real solo si estan host, user y pass.
   mailEnabled: Boolean(smtp.host && smtp.user && smtp.pass),
+  cloudinary,
+  uploadsEnabled: Boolean(
+    cloudinary.cloudName && cloudinary.apiKey && cloudinary.apiSecret,
+  ),
 };
