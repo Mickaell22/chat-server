@@ -27,10 +27,12 @@ model User {
 model Room {
   id        String   @id @default(uuid())
   name      String   @unique
-  createdBy String
+  // Opcional: la sala global es "del sistema" (sin creador). Las salas que
+  // crean los usuarios si llevan createdBy.
+  createdBy String?
   createdAt DateTime @default(now())
 
-  creator  User         @relation("RoomCreator", fields: [createdBy], references: [id])
+  creator  User?        @relation("RoomCreator", fields: [createdBy], references: [id])
   members  RoomMember[]
   messages Message[]
 }
