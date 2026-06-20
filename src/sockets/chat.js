@@ -15,7 +15,7 @@ const online = new Map();
 function addPresence(user) {
   const entry = online.get(user.id);
   if (entry) entry.count += 1;
-  else online.set(user.id, { username: user.username, count: 1 });
+  else online.set(user.id, { username: user.username, avatarUrl: user.avatarUrl, count: 1 });
 }
 
 function removePresence(userId) {
@@ -26,7 +26,11 @@ function removePresence(userId) {
 }
 
 function onlineList() {
-  return [...online.entries()].map(([id, { username }]) => ({ id, username }));
+  return [...online.entries()].map(([id, { username, avatarUrl }]) => ({
+    id,
+    username,
+    avatarUrl,
+  }));
 }
 
 // Asegura que la sala global exista (idempotente). Cachea su id tras el primer
@@ -51,7 +55,11 @@ function toClientMessage(msg) {
     content: msg.content,
     roomId: msg.roomId,
     createdAt: msg.createdAt,
-    sender: { id: msg.sender.id, username: msg.sender.username },
+    sender: {
+      id: msg.sender.id,
+      username: msg.sender.username,
+      avatarUrl: msg.sender.avatarUrl,
+    },
   };
 }
 
@@ -59,7 +67,13 @@ export function registerChatHandlers(io) {
   io.on('connection', async (socket) => {
     const { user } = socket.data;
 
-    addPresence(user);
+    // El JWT solo trae id/username; el avatar puede haber cambiado, asi que lo
+    // leemos de la DB para mostrarlo en la lista de online.
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { avatarUrl: true },
+    });
+    addPresence({ ...user, avatarUrl: dbUser?.avatarUrl ?? null });
     socket.join(GLOBAL_ROOM_NAME);
     io.emit('users:online', onlineList());
     console.log(`[chat] conectado ${user.username} (online: ${online.size})`);
@@ -71,7 +85,7 @@ export function registerChatHandlers(io) {
         where: { roomId },
         orderBy: { createdAt: 'desc' },
         take: MESSAGE_HISTORY_LIMIT,
-        include: { sender: { select: { id: true, username: true } } },
+        include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
       });
       socket.emit('room:history', {
         room: GLOBAL_ROOM_NAME,
@@ -93,7 +107,7 @@ export function registerChatHandlers(io) {
         const roomId = await getGlobalRoomId();
         const msg = await prisma.message.create({
           data: { content, senderId: user.id, roomId },
-          include: { sender: { select: { id: true, username: true } } },
+          include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
         });
         io.to(GLOBAL_ROOM_NAME).emit('room:message', toClientMessage(msg));
         ack?.({ ok: true });

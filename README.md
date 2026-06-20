@@ -147,10 +147,18 @@ cp .env.example .env
 | `SMTP_USER` | Usuario/cuenta SMTP | `tucuenta@gmail.com` |
 | `SMTP_PASS` | Contraseña o app password SMTP | `xxxx xxxx xxxx xxxx` |
 | `MAIL_FROM` | Remitente visible | `Chat en tiempo real <tucuenta@gmail.com>` |
+| `CLOUDINARY_CLOUD_NAME` | Cloud name de Cloudinary (avatares) | `dxxxxxxxx` |
+| `CLOUDINARY_API_KEY` | API key de Cloudinary | `581448341657859` |
+| `CLOUDINARY_API_SECRET` | API secret de Cloudinary (solo server) | `xxxxxxxxxxxxxxx` |
 
 > Las variables `SMTP_*` son para la verificación de email y la recuperación de
 > contraseña. Con Gmail, usá un **app password** y poné en `MAIL_FROM` la misma
 > dirección de `SMTP_USER` (Gmail fuerza el remitente a la cuenta autenticada).
+
+> Las variables `CLOUDINARY_*` son para la subida de avatares de perfil. Son
+> **opcionales**: si faltan, el endpoint de avatar responde `503` y el resto del
+> server funciona igual. El **API secret vive solo en el server**, nunca se expone
+> al cliente (la subida es firmada del lado del servidor).
 
 ---
 
@@ -182,8 +190,8 @@ que está vivo.
 
 | Entidad | Descripción |
 |---------|-------------|
-| **User** | Usuarios registrados (username, email, passwordHash). |
-| **Room** | Salas de chat. |
+| **User** | Usuarios registrados (username, email, passwordHash, emailVerified, avatarUrl). |
+| **Room** | Salas de chat. La sala global es "del sistema" (`createdBy` opcional). |
 | **RoomMember** | Relación usuario ↔ sala (quién está en qué sala). |
 | **Message** | Mensaje de sala (`roomId`) o privado (`recipientId`). |
 
@@ -201,23 +209,28 @@ que está vivo.
 | `POST` | `/api/auth/verify-email` | Verificar el correo con el token recibido | No |
 | `POST` | `/api/auth/request-password-reset` | Solicitar enlace de recuperación por correo | No |
 | `POST` | `/api/auth/reset-password` | Establecer nueva contraseña con el token | No |
+| `POST` | `/api/users/me/avatar` | Subir/actualizar la foto de perfil (multipart, campo `avatar`) | Sí |
 
-> Las rutas de chat se manejan por WebSocket, no por HTTP. _(Endpoints en construcción)._
+> Las rutas de chat se manejan por WebSocket, no por HTTP.
 
 ---
 
 ## Eventos de WebSocket
 
-| Evento | Dirección | Descripción |
-|--------|-----------|-------------|
-| `users:online` | server → cliente | Lista de usuarios conectados |
-| `room:join` | cliente → server | Unirse a una sala |
-| `room:leave` | cliente → server | Salir de una sala |
-| `room:message` | bidireccional | Mensaje dentro de una sala |
-| `dm:message` | bidireccional | Mensaje privado entre dos usuarios |
+| Evento | Dirección | Descripción | Estado |
+|--------|-----------|-------------|--------|
+| `users:online` | server → cliente | Lista de usuarios conectados (con avatar) | Implementado |
+| `room:history` | server → cliente | Últimos N mensajes al entrar a una sala | Implementado |
+| `room:message` | bidireccional | Mensaje dentro de una sala (hoy: la global) | Implementado |
+| `room:join` | cliente → server | Unirse a una sala | Pendiente (salas múltiples) |
+| `room:leave` | cliente → server | Salir de una sala | Pendiente (salas múltiples) |
+| `dm:message` | bidireccional | Mensaje privado entre dos usuarios | Pendiente (DM) |
 
 > El JWT se envía en `auth: { token }` durante el handshake y se valida con un
 > middleware `io.use(...)` antes de aceptar la conexión.
+>
+> Hoy está implementada la **sala global** con usuarios online y persistencia.
+> Las salas múltiples y los DM son los siguientes incrementos.
 
 ---
 
