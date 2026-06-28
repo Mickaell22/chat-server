@@ -56,11 +56,16 @@ model Message {
   senderId    String
   roomId      String?
   recipientId String?
+  // Respuesta a otro mensaje (estilo Discord). Opcional. Si se borra el mensaje
+  // citado, la respuesta queda con replyToId null (SetNull), no se borra.
+  replyToId   String?
   createdAt   DateTime @default(now())
 
-  sender    User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  room      Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  recipient User? @relation("MessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  sender    User      @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  room      Room?     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  recipient User?     @relation("MessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[] @relation("MessageReplies")
 
   @@index([roomId, createdAt])
   @@index([senderId, recipientId, createdAt])
