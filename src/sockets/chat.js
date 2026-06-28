@@ -48,7 +48,16 @@ async function getGlobalRoomId() {
   return globalRoomId;
 }
 
-// Da forma al mensaje que viaja al cliente: plano, con el remitente embebido.
+// include reutilizable: remitente + el mensaje citado (con su autor) si lo hay.
+const MESSAGE_INCLUDE = {
+  sender: { select: { id: true, username: true, avatarUrl: true } },
+  replyTo: {
+    include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+  },
+};
+
+// Da forma al mensaje que viaja al cliente: plano, con el remitente embebido y,
+// si es una respuesta, una cita liviana del mensaje original.
 function toClientMessage(msg) {
   return {
     id: msg.id,
@@ -60,6 +69,17 @@ function toClientMessage(msg) {
       username: msg.sender.username,
       avatarUrl: msg.sender.avatarUrl,
     },
+    replyTo: msg.replyTo
+      ? {
+          id: msg.replyTo.id,
+          content: msg.replyTo.content,
+          sender: {
+            id: msg.replyTo.sender.id,
+            username: msg.replyTo.sender.username,
+            avatarUrl: msg.replyTo.sender.avatarUrl,
+          },
+        }
+      : null,
   };
 }
 
@@ -85,7 +105,7 @@ export function registerChatHandlers(io) {
         where: { roomId },
         orderBy: { createdAt: 'desc' },
         take: MESSAGE_HISTORY_LIMIT,
-        include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+        include: MESSAGE_INCLUDE,
       });
       socket.emit('room:history', {
         room: GLOBAL_ROOM_NAME,
@@ -103,17 +123,51 @@ export function registerChatHandlers(io) {
       if (content.length > MAX_MESSAGE_LENGTH) {
         return ack?.({ error: 'Mensaje demasiado largo.' });
       }
+      const replyToId = typeof payload?.replyToId === 'string' ? payload.replyToId : null;
       try {
         const roomId = await getGlobalRoomId();
+        // El replyToId es input no confiable: solo se acepta si el mensaje
+        // citado existe y pertenece a esta misma sala.
+        let validReplyToId = null;
+        if (replyToId) {
+          const parent = await prisma.message.findUnique({
+            where: { id: replyToId },
+            select: { id: true, roomId: true },
+          });
+          if (parent && parent.roomId === roomId) validReplyToId = parent.id;
+        }
         const msg = await prisma.message.create({
-          data: { content, senderId: user.id, roomId },
-          include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+          data: { content, senderId: user.id, roomId, replyToId: validReplyToId },
+          include: MESSAGE_INCLUDE,
         });
         io.to(GLOBAL_ROOM_NAME).emit('room:message', toClientMessage(msg));
         ack?.({ ok: true });
       } catch (err) {
         console.error('Error guardando mensaje:', err.message);
         ack?.({ error: 'No se pudo enviar el mensaje.' });
+      }
+    });
+
+    // Borrar un mensaje propio. Solo el autor puede (limite de confianza: se
+    // valida en el server, no se confia en que el cliente oculte el boton).
+    socket.on('room:message:delete', async (payload, ack) => {
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      if (!id) return ack?.({ error: 'Falta el id del mensaje.' });
+      try {
+        const msg = await prisma.message.findUnique({
+          where: { id },
+          select: { id: true, senderId: true },
+        });
+        if (!msg) return ack?.({ error: 'El mensaje no existe.' });
+        if (msg.senderId !== user.id) {
+          return ack?.({ error: 'No podes borrar este mensaje.' });
+        }
+        await prisma.message.delete({ where: { id } });
+        io.to(GLOBAL_ROOM_NAME).emit('room:message:deleted', { id });
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error borrando mensaje:', err.message);
+        ack?.({ error: 'No se pudo borrar el mensaje.' });
       }
     });
 
