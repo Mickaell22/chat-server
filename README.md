@@ -2,9 +2,9 @@
 
 # chat-server
 
-### Backend de un sistema de chat en tiempo real con WebSockets
+### Backend de pub, un sistema de chat en tiempo real con WebSockets
 
-Servidor de chat en tiempo real desarrollado como proyecto de **Aplicaciones Distribuidas**.
+Servidor de **pub**, un chat en tiempo real desarrollado como proyecto de **Aplicaciones Distribuidas**.
 Expone una API de autenticación con JWT y un servidor WebSocket (Socket.IO) para
 mensajería instantánea con salas múltiples y mensajes privados.
 
@@ -141,19 +141,20 @@ cp .env.example .env
 | `JWT_SECRET` | Secreto para firmar los JWT (largo y aleatorio) | `xxxxxxxx...` |
 | `JWT_EXPIRES_IN` | Expiración del token | `7d` |
 | `CLIENT_ORIGIN` | Origen permitido para CORS (URL del cliente) | `http://localhost:5173` |
-| `SMTP_HOST` | Host del servidor SMTP (correos) | `smtp.gmail.com` |
-| `SMTP_PORT` | Puerto SMTP (587 STARTTLS / 465 TLS) | `587` |
-| `SMTP_SECURE` | `true` si el puerto es 465, si no `false` | `false` |
-| `SMTP_USER` | Usuario/cuenta SMTP | `tucuenta@gmail.com` |
-| `SMTP_PASS` | Contraseña o app password SMTP | `xxxx xxxx xxxx xxxx` |
-| `MAIL_FROM` | Remitente visible | `Chat en tiempo real <tucuenta@gmail.com>` |
+| `RESEND_API_KEY` | API key de [Resend](https://resend.com) (correos) | `re_xxxxxxxxxxxx` |
+| `MAIL_FROM` | Remitente visible | `pub <no-reply@pub.novamicktools.com>` |
 | `CLOUDINARY_CLOUD_NAME` | Cloud name de Cloudinary (avatares) | `dxxxxxxxx` |
 | `CLOUDINARY_API_KEY` | API key de Cloudinary | `581448341657859` |
 | `CLOUDINARY_API_SECRET` | API secret de Cloudinary (solo server) | `xxxxxxxxxxxxxxx` |
 
-> Las variables `SMTP_*` son para la verificación de email y la recuperación de
-> contraseña. Con Gmail, usá un **app password** y poné en `MAIL_FROM` la misma
-> dirección de `SMTP_USER` (Gmail fuerza el remitente a la cuenta autenticada).
+> `RESEND_API_KEY` es para la verificación de email y la recuperación de
+> contraseña. Se usa la API HTTP de Resend (no SMTP): Railway bloquea/filtra
+> los puertos salientes que usa SMTP, por eso el cambio. El dominio
+> `pub.novamicktools.com` está verificado en Resend (registros DNS en
+> Cloudflare), así que se puede enviar desde `no-reply@pub.novamicktools.com`
+> a cualquier destinatario. Sin un dominio propio verificado, `MAIL_FROM`
+> tendría que ser `onboarding@resend.dev` (solo permite enviar a la casilla
+> con la que te registraste en Resend).
 
 > Las variables `CLOUDINARY_*` son para la subida de avatares de perfil. Son
 > **opcionales**: si faltan, el endpoint de avatar responde `503` y el resto del
@@ -236,11 +237,25 @@ que está vivo.
 
 ## Despliegue en Railway
 
-1. Crear un proyecto en [Railway](https://railway.app) y agregar el plugin **PostgreSQL**.
-2. Crear un servicio desde este repositorio.
-3. Configurar las variables de entorno (`DATABASE_URL` la provee Railway; setear
-   `JWT_SECRET` y `CLIENT_ORIGIN` con la URL del frontend desplegado).
-4. Comando de inicio: `npm start` (las migraciones se aplican con `npm run prisma:deploy`).
+Desplegado en el proyecto **chat-tiempo-real**, servicio **chat-server**
+(linkeado al repo de GitHub: cada push a `main` dispara redeploy automático):
+
+**https://chat-server-production-fcc5.up.railway.app**
+
+Pasos seguidos:
+
+1. Proyecto Railway con el plugin **PostgreSQL** (servicio `Postgres`).
+2. Servicio `chat-server` creado con `railway add --repo <owner>/chat-server`.
+3. Variables de entorno cargadas desde `.env` local; `DATABASE_URL` referencia
+   la interna del servicio Postgres: `${{Postgres.DATABASE_URL}}`.
+4. Migraciones aplicadas una sola vez de forma manual usando la URL **pública**
+   del Postgres (`DATABASE_PUBLIC_URL`, no la interna `postgres.railway.internal`,
+   que no es alcanzable desde fuera de la red de Railway):
+   ```bash
+   DATABASE_URL=<DATABASE_PUBLIC_URL de Railway> npx prisma migrate deploy
+   ```
+5. Comando de inicio: `npm start` (definido en `package.json`).
+6. Dominio público generado con `railway domain`.
 
 ---
 
