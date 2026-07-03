@@ -191,7 +191,7 @@ que está vivo.
 
 | Entidad | Descripción |
 |---------|-------------|
-| **User** | Usuarios registrados (username, email, passwordHash, emailVerified, avatarUrl). |
+| **User** | Usuarios registrados (username, email, passwordHash, emailVerified, avatarUrl, alias, bio, profileColor). |
 | **Room** | Salas de chat. La sala global es "del sistema" (`createdBy` opcional). |
 | **RoomMember** | Relación usuario ↔ sala (quién está en qué sala). |
 | **Message** | Mensaje de sala (`roomId`) o privado (`recipientId`). |
@@ -210,7 +210,10 @@ que está vivo.
 | `POST` | `/api/auth/verify-email` | Verificar el correo con el token recibido | No |
 | `POST` | `/api/auth/request-password-reset` | Solicitar enlace de recuperación por correo | No |
 | `POST` | `/api/auth/reset-password` | Establecer nueva contraseña con el token | No |
+| `POST` | `/api/auth/resend-verification` | Reenviar el correo de verificación (cooldown 60s) | Sí |
 | `POST` | `/api/users/me/avatar` | Subir/actualizar la foto de perfil (multipart, campo `avatar`) | Sí |
+| `PATCH` | `/api/users/me` | Actualizar alias, bio y/o color de perfil | Sí |
+| `GET` | `/api/users/:id` | Ver el perfil público de un usuario (con su presencia) | Sí |
 
 > Las rutas de chat se manejan por WebSocket, no por HTTP.
 
@@ -220,7 +223,8 @@ que está vivo.
 
 | Evento | Dirección | Descripción | Estado |
 |--------|-----------|-------------|--------|
-| `users:online` | server → cliente | Lista de usuarios conectados (con avatar) | Implementado |
+| `users:online` | server → cliente | Lista de usuarios conectados (avatar, alias, status) | Implementado |
+| `presence:set` | cliente → server | Cambiar el estado propio (`online`/`dnd`/`invisible`) | Implementado |
 | `room:history` | server → cliente | Últimos N mensajes al entrar a una sala | Implementado |
 | `room:message` | bidireccional | Mensaje dentro de una sala (hoy: la global) | Implementado |
 | `room:join` | cliente → server | Unirse a una sala | Pendiente (salas múltiples) |
