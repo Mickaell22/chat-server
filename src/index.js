@@ -5,6 +5,7 @@ import { Server } from 'socket.io';
 import { env } from './config/env.js';
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import friendshipRoutes from "./routes/friendshipRoutes.js";
 import { socketAuth } from './middleware/auth.js';
 import { registerChatHandlers } from './sockets/chat.js';
 
@@ -17,6 +18,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/friendships', friendshipRoutes);
 
 const server = http.createServer(app);
 
