@@ -99,7 +99,9 @@ model Friendship {
   //indices para busquedas
   @@index([userId])
   @@index([friendId])
-  @@index([userId, friendId])
+  // Un unico vinculo por par (direccion emisor->receptor): evita solicitudes
+  // duplicadas. La direccion inversa se controla a nivel app (findFirst con OR).
+  @@unique([userId, friendId])
 }
 
 enum FriendshipState {

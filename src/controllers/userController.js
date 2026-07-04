@@ -56,3 +56,30 @@ export async function updateProfile(req, res) {
     return res.status(500).json({ error: 'No se pudo actualizar el perfil.' });
   }
 }
+
+// GET /api/users/search?q=texto  (requireAuth)
+// Busca usuarios por username o alias (para agregar amigos). Excluye al propio
+// usuario y limita a 10 resultados. Query corta -> lista vacia (no escanea todo).
+const USER_SEARCH_SELECT = { id: true, username: true, alias: true, avatarUrl: true };
+
+export async function searchUsers(req, res) {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (q.length < 2) return res.json([]);
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        id: { not: req.user.id },
+        OR: [
+          { username: { contains: q, mode: 'insensitive' } },
+          { alias: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      select: USER_SEARCH_SELECT,
+      take: 10,
+    });
+    return res.json(users);
+  } catch (err) {
+    console.error('Error buscando usuarios:', err.message);
+    return res.status(500).json({ error: 'No se pudo buscar usuarios.' });
+  }
+}
