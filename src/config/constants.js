@@ -10,3 +10,24 @@ export const MESSAGE_HISTORY_LIMIT = 50;
 // Tope de longitud de un mensaje (limite de confianza: el socket es input no
 // confiable). Se valida server-side antes de persistir.
 export const MAX_MESSAGE_LENGTH = 2000;
+
+// Perfil: limites de los campos editables (limite de confianza).
+export const ALIAS_MAX_LENGTH = 40;
+export const BIO_MAX_LENGTH = 160;
+
+// Paleta cerrada para el color de perfil (tono 400, misma familia que los
+// tokens semanticos --online/--error/--warning). No se acepta un hex libre:
+// evita que el usuario mande cualquier color fuera del sistema de diseño.
+export const PROFILE_COLORS = [
+  '#f87171', // rojo
+  '#fb923c', // naranja
+  '#fbbf24', // ambar
+  '#4ade80', // verde
+  '#22d3ee', // cian
+  '#60a5fa', // azul
+  '#a78bfa', // violeta
+  '#f472b6', // rosa
+];
+
+// Cooldown entre reenvios del correo de verificacion.
+export const RESEND_COOLDOWN_MS = 60_000;

@@ -19,6 +19,14 @@ model User {
   avatarUrl     String?
   createdAt     DateTime @default(now())
 
+  // Nombre visible editable (username es el handle inmutable). Null = usar
+  // el username como display name.
+  alias         String?
+  bio           String?
+  // Hex de una paleta cerrada (ver PROFILE_COLORS en constants.js), validado
+  // server-side. Null = sin color custom.
+  profileColor  String?
+
   createdRooms           Room[]       @relation("RoomCreator")
   memberships            RoomMember[]
   sentMessages           Message[]    @relation("MessageSender")

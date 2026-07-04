@@ -5,17 +5,29 @@ import {
   MAX_MESSAGE_LENGTH,
 } from '../config/constants.js';
 
-// Presencia en memoria: userId -> { username, count }. count cuenta sockets
-// del mismo usuario (varias pestañas), asi solo aparece/desaparece de "online"
-// cuando abre la primera o cierra la ultima.
+// Presencia en memoria: userId -> { username, count, status }. count cuenta
+// sockets del mismo usuario (varias pestañas), asi solo aparece/desaparece de
+// "online" cuando abre la primera o cierra la ultima. status es manual
+// (online/dnd/invisible), elegido por el usuario via 'presence:set'; arranca
+// en 'online' y NO se persiste entre reconexiones (si cierra todas las
+// pestañas y vuelve, arranca en 'online' de nuevo).
 // ponytail: estado en memoria, no sobrevive reinicio ni escala a multi-instancia.
 // Techo: un solo proceso. Upgrade: @socket.io/redis-adapter + presencia en Redis.
 const online = new Map();
+const PRESENCE_STATUSES = ['online', 'dnd', 'invisible'];
 
 function addPresence(user) {
   const entry = online.get(user.id);
   if (entry) entry.count += 1;
-  else online.set(user.id, { username: user.username, avatarUrl: user.avatarUrl, count: 1 });
+  else {
+    online.set(user.id, {
+      username: user.username,
+      alias: user.alias,
+      avatarUrl: user.avatarUrl,
+      count: 1,
+      status: 'online',
+    });
+  }
 }
 
 function removePresence(userId) {
@@ -26,11 +38,42 @@ function removePresence(userId) {
 }
 
 function onlineList() {
-  return [...online.entries()].map(([id, { username, avatarUrl }]) => ({
+  return [...online.entries()].map(([id, { username, alias, avatarUrl, status }]) => ({
     id,
     username,
+    alias,
     avatarUrl,
+    status,
   }));
+}
+
+// Un usuario invisible sigue "presente" pero solo se muestra a si mismo (para
+// que su propio selector de estado refleje la eleccion real); para cualquier
+// otro viewer cuenta como si no estuviera.
+export function isVisibleTo(entry, viewerId) {
+  return entry.status !== 'invisible' || entry.userId === viewerId;
+}
+
+// Status de un usuario tal como lo veria `viewerId` (usado por
+// GET /api/users/:id para mostrar el estado en el perfil ajeno).
+export function getPresenceStatus(targetId, viewerId) {
+  const entry = online.get(targetId);
+  if (!entry) return 'offline';
+  return isVisibleTo({ ...entry, userId: targetId }, viewerId) ? entry.status : 'offline';
+}
+
+// Emite 'users:online' a todos con la lista publica (sin invisibles), y ademas
+// manda la lista completa (incluyendose a si mismo) solo a la room personal de
+// cada usuario invisible, para que su propio cliente sepa que sigue "online".
+function broadcastPresence(io) {
+  const list = onlineList();
+  const publicList = list.filter((u) => u.status !== 'invisible');
+  io.emit('users:online', publicList);
+  for (const u of list) {
+    if (u.status === 'invisible') {
+      io.to(`user:${u.id}`).emit('users:online', [...publicList, u]);
+    }
+  }
 }
 
 // Asegura que la sala global exista (idempotente). Cachea su id tras el primer
@@ -49,12 +92,15 @@ async function getGlobalRoomId() {
 }
 
 // include reutilizable: remitente + el mensaje citado (con su autor) si lo hay.
+const SENDER_SELECT = { id: true, username: true, alias: true, avatarUrl: true };
 const MESSAGE_INCLUDE = {
-  sender: { select: { id: true, username: true, avatarUrl: true } },
-  replyTo: {
-    include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
-  },
+  sender: { select: SENDER_SELECT },
+  replyTo: { include: { sender: { select: SENDER_SELECT } } },
 };
+
+function toClientSender(sender) {
+  return { id: sender.id, username: sender.username, alias: sender.alias, avatarUrl: sender.avatarUrl };
+}
 
 // Da forma al mensaje que viaja al cliente: plano, con el remitente embebido y,
 // si es una respuesta, una cita liviana del mensaje original.
@@ -64,20 +110,12 @@ function toClientMessage(msg) {
     content: msg.content,
     roomId: msg.roomId,
     createdAt: msg.createdAt,
-    sender: {
-      id: msg.sender.id,
-      username: msg.sender.username,
-      avatarUrl: msg.sender.avatarUrl,
-    },
+    sender: toClientSender(msg.sender),
     replyTo: msg.replyTo
       ? {
           id: msg.replyTo.id,
           content: msg.replyTo.content,
-          sender: {
-            id: msg.replyTo.sender.id,
-            username: msg.replyTo.sender.username,
-            avatarUrl: msg.replyTo.sender.avatarUrl,
-          },
+          sender: toClientSender(msg.replyTo.sender),
         }
       : null,
   };
@@ -87,15 +125,16 @@ export function registerChatHandlers(io) {
   io.on('connection', async (socket) => {
     const { user } = socket.data;
 
-    // El JWT solo trae id/username; el avatar puede haber cambiado, asi que lo
-    // leemos de la DB para mostrarlo en la lista de online.
+    // El JWT solo trae id/username; avatar y alias pueden haber cambiado desde
+    // que se firmo, asi que se leen de la DB para la lista de online.
     const dbUser = await prisma.user.findUnique({
       where: { id: user.id },
-      select: { avatarUrl: true },
+      select: { avatarUrl: true, alias: true },
     });
-    addPresence({ ...user, avatarUrl: dbUser?.avatarUrl ?? null });
+    addPresence({ ...user, avatarUrl: dbUser?.avatarUrl ?? null, alias: dbUser?.alias ?? null });
     socket.join(GLOBAL_ROOM_NAME);
-    io.emit('users:online', onlineList());
+    socket.join(`user:${user.id}`);
+    broadcastPresence(io);
     console.log(`[chat] conectado ${user.username} (online: ${online.size})`);
 
     // Historia de la sala global: ultimos N, en orden cronologico ascendente.
@@ -171,9 +210,20 @@ export function registerChatHandlers(io) {
       }
     });
 
+    // Cambio manual de estado (online/dnd/invisible). Input no confiable: se
+    // valida contra el enum antes de aplicar.
+    socket.on('presence:set', (payload) => {
+      const status = typeof payload?.status === 'string' ? payload.status : '';
+      if (!PRESENCE_STATUSES.includes(status)) return;
+      const entry = online.get(user.id);
+      if (!entry) return;
+      entry.status = status;
+      broadcastPresence(io);
+    });
+
     socket.on('disconnect', (reason) => {
       removePresence(user.id);
-      io.emit('users:online', onlineList());
+      broadcastPresence(io);
       console.log(`[chat] desconectado ${user.username} (${reason}, online: ${online.size})`);
     });
   });

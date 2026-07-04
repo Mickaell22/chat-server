@@ -10,15 +10,15 @@ function required(name) {
   return value;
 }
 
-// SMTP es opcional: si falta, el server arranca igual y el mailer cae a modo
-// consola (loguea el link en vez de enviarlo). La verificacion no bloquea login.
-const smtp = {
-  host: process.env.SMTP_HOST || '',
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: process.env.SMTP_SECURE === 'true',
-  user: process.env.SMTP_USER || '',
-  pass: process.env.SMTP_PASS || '',
-  from: process.env.MAIL_FROM || 'Chat en tiempo real <no-reply@ejemplo.com>',
+// Resend es opcional: si falta la API key, el server arranca igual y el
+// mailer cae a modo consola (loguea el link en vez de enviarlo). La
+// verificacion no bloquea login.
+// ponytail: se usa la API HTTP de Resend con fetch nativo (Node >= 18), sin
+// SDK. SMTP se descarto porque Railway bloquea/filtra los puertos salientes
+// que usa (25/465/587); una API sobre HTTPS no tiene ese problema.
+const resend = {
+  apiKey: process.env.RESEND_API_KEY || '',
+  from: process.env.MAIL_FROM || 'pub <no-reply@ejemplo.com>',
 };
 
 // Cloudinary es opcional: si faltan credenciales, el endpoint de subida de
@@ -36,9 +36,8 @@ export const env = {
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
-  smtp,
-  // Hay envio real solo si estan host, user y pass.
-  mailEnabled: Boolean(smtp.host && smtp.user && smtp.pass),
+  resend,
+  mailEnabled: Boolean(resend.apiKey),
   cloudinary,
   uploadsEnabled: Boolean(
     cloudinary.cloudName && cloudinary.apiKey && cloudinary.apiSecret,

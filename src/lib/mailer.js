@@ -1,24 +1,11 @@
-import nodemailer from 'nodemailer';
 import { env } from '../config/env.js';
 
-// Transporter perezoso: se crea en el primer envio real, no al importar.
-let transporter = null;
+const RESEND_API_URL = 'https://api.resend.com/emails';
 
-function getTransporter() {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: env.smtp.host,
-      port: env.smtp.port,
-      secure: env.smtp.secure,
-      auth: { user: env.smtp.user, pass: env.smtp.pass },
-    });
-  }
-  return transporter;
-}
-
-// Envia un correo. Si SMTP no esta configurado (env.mailEnabled=false), cae a
-// modo consola: loguea el contenido en vez de enviarlo. Asi el flujo funciona
-// en desarrollo sin credenciales y no se rompe nada.
+// Envia un correo via la API HTTP de Resend. Si no esta configurado
+// (env.mailEnabled=false), cae a modo consola: loguea el contenido en vez de
+// enviarlo. Asi el flujo funciona en desarrollo sin credenciales y no se
+// rompe nada.
 export async function sendMail({ to, subject, html, text }) {
   if (!env.mailEnabled) {
     console.log(
@@ -26,7 +13,17 @@ export async function sendMail({ to, subject, html, text }) {
     );
     return;
   }
-  await getTransporter().sendMail({ from: env.smtp.from, to, subject, html, text });
+  const res = await fetch(RESEND_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${env.resend.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from: env.resend.from, to, subject, html, text }),
+  });
+  if (!res.ok) {
+    throw new Error(`Resend respondio ${res.status}: ${await res.text()}`);
+  }
 }
 
 // username esta validado server-side (solo [a-zA-Z0-9_]), asi que es seguro
@@ -37,7 +34,7 @@ export function sendVerificationEmail(user, link) {
     subject: 'Verifica tu correo',
     text: `Hola ${user.username}, verifica tu correo: ${link}`,
     html: `<p>Hola <b>${user.username}</b>,</p>
-<p>Confirma tu correo para activar tu cuenta de Chat en tiempo real:</p>
+<p>Confirma tu correo para activar tu cuenta de pub:</p>
 <p><a href="${link}">Verificar mi correo</a></p>
 <p>Si no creaste esta cuenta, ignora este mensaje.</p>`,
   });

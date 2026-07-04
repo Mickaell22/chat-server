@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { prisma } from '../lib/prisma.js';
 import { env } from '../config/env.js';
+import { RESEND_COOLDOWN_MS } from '../config/constants.js';
 import {
   signToken,
   signEmailVerifyToken,
@@ -16,15 +17,43 @@ const BCRYPT_ROUNDS = 10;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_RE = /^[a-zA-Z0-9_]{3,30}$/;
 
-// Nunca exponer passwordHash en las respuestas.
+// Nunca exponer passwordHash en las respuestas. Vista propia: incluye email.
 export function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
+    alias: user.alias,
     email: user.email,
     emailVerified: user.emailVerified,
     avatarUrl: user.avatarUrl,
+    bio: user.bio,
+    profileColor: user.profileColor,
+    createdAt: user.createdAt,
   };
+}
+
+// Vista de un perfil ajeno: sin email ni emailVerified.
+export function publicProfile(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    alias: user.alias,
+    avatarUrl: user.avatarUrl,
+    bio: user.bio,
+    profileColor: user.profileColor,
+    createdAt: user.createdAt,
+  };
+}
+
+// userId -> timestamp (ms) del ultimo reenvio de verificacion. En memoria,
+// mismo criterio que la presencia de sockets.js: no sobrevive un reinicio ni
+// escala a multi-instancia, aceptable para este proyecto (single instance).
+const resendCooldown = new Map();
+
+export function msUntilCooldownEnds(lastSentAt, now = Date.now()) {
+  if (!lastSentAt) return 0;
+  const remaining = RESEND_COOLDOWN_MS - (now - lastSentAt);
+  return remaining > 0 ? remaining : 0;
 }
 
 // POST /api/auth/register
@@ -157,5 +186,36 @@ export async function resetPassword(req, res) {
     return res.json({ message: 'Contraseña actualizada. Ya podes iniciar sesion.' });
   } catch {
     return res.status(400).json({ error: 'Token invalido o expirado.' });
+  }
+}
+
+// POST /api/auth/resend-verification (requireAuth)
+export async function resendVerification(req, res) {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    if (user.emailVerified) {
+      return res.status(400).json({ error: 'Tu correo ya esta verificado.' });
+    }
+
+    const remaining = msUntilCooldownEnds(resendCooldown.get(user.id));
+    if (remaining > 0) {
+      return res.status(429).json({
+        error: 'Espera un poco antes de reenviar.',
+        retryAfter: Math.ceil(remaining / 1000),
+      });
+    }
+
+    // Marca el cooldown antes de awaitear el envio: evita que un doble-click
+    // dispare dos correos mientras el primero todavia esta en vuelo.
+    resendCooldown.set(user.id, Date.now());
+
+    const verifyToken = signEmailVerifyToken(user);
+    const link = `${env.clientOrigin}/verify-email?token=${verifyToken}`;
+    await sendVerificationEmail(user, link);
+    return res.json({ message: 'Correo de verificacion reenviado.' });
+  } catch (err) {
+    console.error('Error en resendVerification:', err.message);
+    return res.status(500).json({ error: 'No se pudo reenviar el correo.' });
   }
 }
