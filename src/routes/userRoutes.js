@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
-import { updateAvatar, getUserProfile, updateProfile } from '../controllers/userController.js';
+import { updateAvatar, getUserProfile, updateProfile, searchUsers } from '../controllers/userController.js';
 
 // El archivo viaja en memoria (no a disco): es chico y se reenvia a Cloudinary.
 // Validacion en el limite de confianza: solo imagenes, maximo 5 MB.
@@ -18,6 +18,8 @@ const router = Router();
 
 router.post('/me/avatar', requireAuth, upload.single('avatar'), updateAvatar);
 router.patch('/me', requireAuth, updateProfile);
+// /search debe ir ANTES de /:id, si no Express lo toma como un id.
+router.get('/search', requireAuth, searchUsers);
 router.get('/:id', requireAuth, getUserProfile);
 
 // Traduce los errores de multer (tipo/tamaño) a respuestas JSON limpias.

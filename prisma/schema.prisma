@@ -27,10 +27,12 @@ model User {
   // server-side. Null = sin color custom.
   profileColor  String?
 
-  createdRooms   Room[]       @relation("RoomCreator")
-  memberships    RoomMember[]
-  sentMessages   Message[]    @relation("MessageSender")
-  receivedDMs    Message[]    @relation("MessageRecipient")
+  createdRooms           Room[]       @relation("RoomCreator")
+  memberships            RoomMember[]
+  sentMessages           Message[]    @relation("MessageSender")
+  receivedDMs            Message[]    @relation("MessageRecipient")
+  sentFriendRequests     Friendship[] @relation("RequestSender")
+  receivedFriendRequests Friendship[] @relation("RequestReceiver")
 }
 
 model Room {
@@ -77,4 +79,34 @@ model Message {
 
   @@index([roomId, createdAt])
   @@index([senderId, recipientId, createdAt])
+}
+
+//una amistad requiere de dos usuarios
+model Friendship {
+  id           String          @id @default(uuid())
+  //el que la envia
+  userId       String
+  //el que aprueba o no
+  friendId     String
+  state        FriendshipState
+  requestDate  DateTime        @default(now())
+  approvalDate DateTime?
+  blockingDate DateTime?
+  createdAt    DateTime        @default(now())
+  sender       User            @relation("RequestSender", fields: [userId], references: [id], onDelete: Cascade)
+  receiver     User            @relation("RequestReceiver", fields: [friendId], references: [id], onDelete: Cascade)
+
+  //indices para busquedas
+  @@index([userId])
+  @@index([friendId])
+  // Un unico vinculo por par (direccion emisor->receptor): evita solicitudes
+  // duplicadas. La direccion inversa se controla a nivel app (findFirst con OR).
+  @@unique([userId, friendId])
+}
+
+enum FriendshipState {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
 }
