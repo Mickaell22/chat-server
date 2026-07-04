@@ -7,6 +7,7 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import { socketAuth } from './middleware/auth.js';
 import { registerChatHandlers } from './sockets/chat.js';
+import { registerCallHandlers } from './sockets/call.js';
 
 const app = express();
 app.use(cors({ origin: env.clientOrigin, credentials: true }));
@@ -30,6 +31,10 @@ io.use(socketAuth);
 // Handlers de chat: usuarios online + sala global con persistencia.
 // (salas multiples y DM llegan en incrementos siguientes)
 registerChatHandlers(io);
+
+// Señalizacion de llamadas de voz 1-a-1 (WebRTC). Solo relaya SDP/ICE; el
+// audio va P2P, no pasa por el server. Ver src/sockets/call.js.
+registerCallHandlers(io);
 
 server.listen(env.port, () => {
   console.log(`Servidor escuchando en http://localhost:${env.port}`);
