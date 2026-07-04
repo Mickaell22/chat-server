@@ -2,8 +2,6 @@ import { prisma } from "../lib/prisma.js";
 import { FriendshipState } from "@prisma/client";
 
 export async function sendFriendship(req, res) {
-  const token = String(req.body?.token ?? "");
-  if (!token) return res.status(400).json({ error: "Falta el token." });
   if (req.user.id === req.body.friendId) {
     return res.status(400).json({
       error: "No puedes enviarte una solicitud de amistad a ti mismo",
@@ -66,8 +64,6 @@ export async function sendFriendship(req, res) {
 }
 
 export async function updateFriendship(req, res) {
-  const token = String(req.body?.token ?? "");
-  if (!token) return res.status(400).json({ error: "Falta el token." });
   const { id } = req.params;
   const { state } = req.body;
   const friendship = await prisma.friendship.findUnique({
@@ -109,20 +105,41 @@ export async function updateFriendship(req, res) {
 }
 
 export async function friendsList(req, res) {
-  const token = String(req.body?.token ?? "");
-  if (!token) return res.status(400).json({ error: "Falta el token." });
-  const friends = await prisma.friendship.findMany({
+  const friendships = await prisma.friendship.findMany({
     where: {
       state: FriendshipState.ACCEPTED,
       OR: [{ userId: req.user.id }, { friendId: req.user.id }],
     },
+    include: {
+      sender: {
+        select: {
+          id: true,
+          username: true,
+          avatarUrl: true,
+        },
+      },
+      receiver: {
+        select: {
+          id: true,
+          username: true,
+          avatarUrl: true,
+        },
+      },
+    },
   });
+  const friends = friendships.map((friendship) => ({
+    id: friendship.id,
+    since: friendship.approvalDate,
+    friend:
+      friendship.sender.id === req.user.id
+        ? friendship.receiver
+        : friendship.sender,
+  }));
+
   return res.json(friends);
 }
 
 export async function friendshipRequests(req, res) {
-  const token = String(req.body?.token ?? "");
-  if (!token) return res.status(400).json({ error: "Falta el token." });
   const requests = await prisma.friendship.findMany({
     where: {
       state: FriendshipState.PENDING,

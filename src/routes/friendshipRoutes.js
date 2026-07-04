@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { requireAuth } from "../middleware/auth.js";
 import {
   friendsList,
   friendshipRequests,
@@ -8,9 +9,9 @@ import {
 
 const router = Router();
 
-router.post("/", sendFriendship);
-router.patch("/:id", updateFriendship);
-router.get("/", friendsList);
-router.get("/requests", friendshipRequests);
+router.post("/", requireAuth, sendFriendship);
+router.patch("/:id", requireAuth, updateFriendship);
+router.get("/", requireAuth, friendsList);
+router.get("/requests", requireAuth, friendshipRequests);
 
 export default router;
