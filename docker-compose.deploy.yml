@@ -1,0 +1,88 @@
+# Compose de DESPLIEGUE para el pipeline: solo referencia imagenes ya
+# construidas (sin build:), asi no depende de rutas de codigo fuente.
+# Los secretos (POSTGRES_PASSWORD, JWT_SECRET) los inyecta Jenkins por entorno.
+
+services:
+  # ==================== STAGING ====================
+  db-staging:
+    image: postgres:16-alpine
+    container_name: chat_db_staging
+    environment:
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: chatdb
+    volumes:
+      - db_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat -d chatdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 90s
+
+  server-staging:
+    image: chat-server:staging
+    container_name: chat_server_staging
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgresql://chat:${POSTGRES_PASSWORD}@db-staging:5432/chatdb?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 7d
+      CLIENT_ORIGIN: http://localhost:8081
+    depends_on:
+      db-staging:
+        condition: service_healthy
+    ports:
+      - "4001:4000"
+
+  client-staging:
+    image: chat-client:staging
+    container_name: chat_client_staging
+    depends_on:
+      - server-staging
+    ports:
+      - "8081:80"
+
+  # ==================== PRODUCCION ====================
+  db-prod:
+    image: postgres:16-alpine
+    container_name: chat_db_prod
+    environment:
+      POSTGRES_USER: chat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: chatdb
+    volumes:
+      - db_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chat -d chatdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 90s
+
+  server-prod:
+    image: chat-server:production
+    container_name: chat_server_prod
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgresql://chat:${POSTGRES_PASSWORD}@db-prod:5432/chatdb?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 7d
+      CLIENT_ORIGIN: http://localhost:8082
+    depends_on:
+      db-prod:
+        condition: service_healthy
+    ports:
+      - "4002:4000"
+
+  client-prod:
+    image: chat-client:production
+    container_name: chat_client_prod
+    depends_on:
+      - server-prod
+    ports:
+      - "8082:80"
+
+volumes:
+  db_staging:
+  db_prod:
