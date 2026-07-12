@@ -7,6 +7,7 @@ import {
   MAX_MESSAGE_LENGTH,
   ROOM_NAME_MIN_LENGTH,
   ROOM_NAME_MAX_LENGTH,
+  REACTION_EMOJIS,
 } from '../config/constants.js';
 
 // Presencia en memoria: userId -> { username, count, status }. count cuenta
@@ -102,6 +103,7 @@ const MESSAGE_INCLUDE = {
   sender: { select: SENDER_SELECT },
   recipient: { select: SENDER_SELECT },
   replyTo: { include: { sender: { select: SENDER_SELECT } } },
+  reactions: { select: { userId: true, emoji: true } },
 };
 
 function toClientSender(sender) {
@@ -119,6 +121,20 @@ function isOwnImageUrl(url) {
   );
 }
 
+// Agrupa las filas de Reaction en [{ emoji, userIds }] respetando el orden
+// de la paleta. Pura para poder testearla.
+export function summarizeReactions(rows) {
+  const byEmoji = new Map();
+  for (const r of rows) {
+    if (!byEmoji.has(r.emoji)) byEmoji.set(r.emoji, []);
+    byEmoji.get(r.emoji).push(r.userId);
+  }
+  return REACTION_EMOJIS.filter((e) => byEmoji.has(e)).map((emoji) => ({
+    emoji,
+    userIds: byEmoji.get(emoji),
+  }));
+}
+
 function toClientMessage(msg) {
   return {
     id: msg.id,
@@ -128,6 +144,7 @@ function toClientMessage(msg) {
     roomId: msg.roomId,
     recipientId: msg.recipientId ?? null,
     createdAt: msg.createdAt,
+    reactions: summarizeReactions(msg.reactions ?? []),
     sender: toClientSender(msg.sender),
     // Solo en DMs: el otro extremo completo, para que cualquier pestaña del
     // remitente pueda pintar la conversacion aunque no la tuviera abierta.
@@ -635,6 +652,55 @@ export function registerChatHandlers(io) {
       } catch (err) {
         console.error('Error editando DM:', err.message);
         ack?.({ error: 'No se pudo editar el mensaje.' });
+      }
+    });
+
+    // Reaccionar a un mensaje (toggle). El emoji se valida contra la paleta
+    // cerrada y hay que poder VER el mensaje (miembro de la sala o extremo
+    // del DM) para reaccionar: limite de confianza.
+    socket.on('message:react', async (payload, ack) => {
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      const emoji = typeof payload?.emoji === 'string' ? payload.emoji : '';
+      if (!id || !REACTION_EMOJIS.includes(emoji)) {
+        return ack?.({ error: 'Reaccion invalida.' });
+      }
+      try {
+        const msg = await prisma.message.findUnique({
+          where: { id },
+          select: { id: true, senderId: true, roomId: true, recipientId: true },
+        });
+        if (!msg) return ack?.({ error: 'El mensaje no existe.' });
+        const globalId = await getGlobalRoomId();
+        if (msg.roomId) {
+          if (msg.roomId !== globalId && !socket.rooms.has(socketRoom(msg.roomId))) {
+            return ack?.({ error: 'No eres miembro de esta sala.' });
+          }
+        } else if (msg.senderId !== user.id && msg.recipientId !== user.id) {
+          return ack?.({ error: 'No puedes reaccionar a este mensaje.' });
+        }
+        // Toggle contra la PK compuesta: si ya existia, se quita.
+        const key = { messageId: id, userId: user.id, emoji };
+        const existing = await prisma.reaction.findUnique({
+          where: { messageId_userId_emoji: key },
+        });
+        if (existing) await prisma.reaction.delete({ where: { messageId_userId_emoji: key } });
+        else await prisma.reaction.create({ data: key });
+        const rows = await prisma.reaction.findMany({
+          where: { messageId: id },
+          select: { userId: true, emoji: true },
+        });
+        const event = { id, reactions: summarizeReactions(rows) };
+        if (msg.roomId) {
+          io.to(socketRoom(msg.roomId)).emit('message:reactions', event);
+        } else {
+          io.to(`user:${msg.senderId}`)
+            .to(`user:${msg.recipientId}`)
+            .emit('message:reactions', event);
+        }
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error reaccionando:', err.message);
+        ack?.({ error: 'No se pudo reaccionar.' });
       }
     });
 

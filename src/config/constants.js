@@ -15,6 +15,10 @@ export const MAX_MESSAGE_LENGTH = 2000;
 export const ROOM_NAME_MIN_LENGTH = 2;
 export const ROOM_NAME_MAX_LENGTH = 24;
 
+// Paleta cerrada de reacciones (limite de confianza: el server no acepta
+// otro emoji). Mantener en sync con REACTION_EMOJIS del cliente.
+export const REACTION_EMOJIS = ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F525}'];
+
 // Perfil: limites de los campos editables (limite de confianza).
 export const ALIAS_MAX_LENGTH = 40;
 export const BIO_MAX_LENGTH = 160;

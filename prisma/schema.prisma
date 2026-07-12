@@ -33,6 +33,7 @@ model User {
   receivedDMs            Message[]    @relation("MessageRecipient")
   sentFriendRequests     Friendship[] @relation("RequestSender")
   receivedFriendRequests Friendship[] @relation("RequestReceiver")
+  reactions              Reaction[]
 }
 
 model Room {
@@ -87,9 +88,25 @@ model Message {
   recipient User?     @relation("MessageRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
   replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies   Message[] @relation("MessageReplies")
+  reactions Reaction[]
 
   @@index([roomId, createdAt])
   @@index([senderId, recipientId, createdAt])
+}
+
+// Reaccion de un usuario a un mensaje con un emoji de la paleta cerrada
+// (REACTION_EMOJIS en constants.js, validada server-side). La PK compuesta
+// hace el toggle trivial: crear si no existe, borrar si ya estaba.
+model Reaction {
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId, emoji])
 }
 
 //una amistad requiere de dos usuarios
