@@ -38,6 +38,8 @@ export function registerCallHandlers(io) {
       io.to(`user:${to}`).emit('call:incoming', {
         from: user.id,
         username: user.username,
+        // Llamada con camara o solo voz: ambos lados abren el mismo tipo.
+        video: Boolean(payload?.video),
       });
     });
 
