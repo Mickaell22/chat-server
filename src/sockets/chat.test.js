@@ -5,7 +5,7 @@ process.env.DATABASE_URL = 'postgresql://test';
 // chat.js ahora importa env.js (para validar imageUrl), que exige JWT_SECRET.
 process.env.JWT_SECRET = 'test';
 
-const { isVisibleTo, mergeDmPartners, normalizeRoomName, summarizeReactions, isValidChatKey, takeToken } = await import('./chat.js');
+const { isVisibleTo, mergeDmPartners, normalizeRoomName, summarizeReactions, isValidChatKey, takeToken, normalizeSearchQuery, canModerate } = await import('./chat.js');
 
 // Online/dnd: visibles para cualquiera.
 assert.equal(isVisibleTo({ status: 'online', userId: 'u1' }, 'u2'), true);
@@ -88,5 +88,21 @@ assert.equal(recarga.ok, true);
 // nunca acumula mas que el burst
 const lleno = takeToken({ tokens: 3, last: 0 }, 999999, 3, 1);
 assert.ok(lleno.bucket.tokens <= 3);
+
+// normalizeSearchQuery: recorta y exige entre 2 y 80 caracteres.
+assert.equal(normalizeSearchQuery('  hola  '), 'hola');
+assert.equal(normalizeSearchQuery('ok'), 'ok');
+assert.equal(normalizeSearchQuery(' a '), null); // muy corto tras recortar
+assert.equal(normalizeSearchQuery('a'.repeat(81)), null); // muy largo
+assert.equal(normalizeSearchQuery(''), null);
+assert.equal(normalizeSearchQuery(undefined), null);
+assert.equal(normalizeSearchQuery(42), null);
+
+// canModerate: solo el creador de la sala; la global (sin creador) nadie.
+assert.equal(canModerate({ createdBy: 'u1' }, 'u1'), true);
+assert.equal(canModerate({ createdBy: 'u1' }, 'u2'), false);
+assert.equal(canModerate({ createdBy: null }, 'u1'), false); // global
+assert.equal(canModerate(null, 'u1'), false); // mensaje sin sala
+assert.equal(canModerate({ createdBy: null }, null), false); // ambos null: no matchea
 
 console.log('chat.test OK');

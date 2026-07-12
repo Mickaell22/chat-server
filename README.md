@@ -53,6 +53,10 @@ mensajería instantánea con salas múltiples y mensajes privados.
 - **Mensajes privados** (DM) entre usuarios.
 - Mensajes con **respuestas**, **edición**, **borrado**, **reacciones** con
   emoji e **imágenes** (Cloudinary, con recompresión server-side).
+- **Mensajes fijados** por sala (cualquier miembro fija/desfija) y
+  **búsqueda de mensajes** en la conversación abierta (sala o DM).
+- **Moderación**: el creador de una sala puede borrar mensajes ajenos y
+  expulsar miembros.
 - **Historial paginado** (cursor `before`) y **no leídos persistentes** por
   conversación (marcas de lectura).
 - **Amistades** (solicitudes, aceptar/rechazar) y perfil público con estado
@@ -246,7 +250,7 @@ que está vivo.
 | `rooms:list` | server → cliente | Salas visibles al conectar: públicas + privadas propias (con `joined` e `inviteCode` si es miembro) |
 | `room:history` | server → cliente (al conectar) / cliente → server (ack) | Historia de la global al conectar; historial de otra sala bajo demanda |
 | `room:message` | bidireccional | Mensaje a una sala (`roomId` opcional, null = global). Acepta `replyToId` e `imageUrl` |
-| `room:message:delete` / `room:message:deleted` | cliente → server / server → sala | Borrar un mensaje propio de sala |
+| `room:message:delete` / `room:message:deleted` | cliente → server / server → sala | Borrar un mensaje de sala (el autor siempre; el creador de la sala puede borrar ajenos) |
 | `room:create` | cliente → server (ack) | Crear sala (`name`, `isPrivate`); el creador queda como miembro |
 | `room:created` | server → todos | Anuncio de sala pública nueva (las privadas no se anuncian) |
 | `room:join` | cliente → server (ack) | Unirse por `roomId` (solo públicas) o por `code` de invitación (cualquiera) |
@@ -259,6 +263,10 @@ que está vivo.
 | `room:message:edit` / `room:message:edited` | cliente → server / server → sala | Editar un mensaje propio (marca `editedAt`) |
 | `dm:message:edit` / `dm:message:edited` | cliente → server / server → ambos extremos | Editar un DM propio |
 | `message:react` / `message:reactions` | cliente → server (ack) / server → conversación | Reaccionar con un emoji de la paleta cerrada (toggle) |
+| `message:pin` / `message:pinned` | cliente → server (ack) / server → sala | Fijar/desfijar un mensaje de sala (toggle; cualquier miembro) |
+| `room:pins` | cliente → server (ack) | Mensajes fijados de una sala (solo miembros) |
+| `messages:search` | cliente → server (ack) | Buscar texto en la conversación abierta (sala o DM); `ILIKE`, máx. 20 resultados |
+| `room:kick` / `room:kicked` | cliente → server (ack) / server → expulsado | El creador de la sala expulsa a un miembro; el expulsado recibe el aviso y sale de la sala |
 | `read:mark` | cliente → server | Marcar una conversación como leída hasta ahora (persistente) |
 | `unread:state` | server → cliente (al conectar) | No leídos acumulados por conversación desde la última lectura |
 | `voice:join` / `voice:leave` | cliente → server (ack) | Entrar/salir del canal de voz de una sala (mesh P2P con tope de participantes) |

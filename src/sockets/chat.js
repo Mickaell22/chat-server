@@ -143,6 +143,7 @@ function toClientMessage(msg) {
     content: msg.content,
     imageUrl: msg.imageUrl ?? null,
     editedAt: msg.editedAt ?? null,
+    pinnedAt: msg.pinnedAt ?? null,
     roomId: msg.roomId,
     recipientId: msg.recipientId ?? null,
     createdAt: msg.createdAt,
@@ -240,6 +241,19 @@ export function isValidChatKey(key) {
   return typeof key === 'string' && /^(room|dm):[0-9a-f-]{36}$/.test(key);
 }
 
+// Texto de busqueda valido (input no confiable): recortado, entre 2 y 80
+// caracteres. Devuelve el texto listo o null si no sirve. Pura para testearla.
+export function normalizeSearchQuery(raw) {
+  const q = typeof raw === 'string' ? raw.trim() : '';
+  return q.length >= 2 && q.length <= 80 ? q : null;
+}
+
+// Un usuario modera una sala si es su creador. La global (createdBy null) no
+// la modera nadie. Pura para poder testearla.
+export function canModerate(room, userId) {
+  return Boolean(room?.createdBy) && room.createdBy === userId;
+}
+
 // No leidos por conversacion segun las marcas de lectura del usuario. Solo
 // cuentan conversaciones CON marca (se crea al abrirla por primera vez) y
 // nunca los mensajes propios.
@@ -306,6 +320,9 @@ function toClientRoom(room, joined) {
     id: room.id,
     name: room.name,
     isPrivate: room.isPrivate,
+    // El cliente muestra las acciones de moderacion solo al creador (el
+    // server igual revalida cada accion: esto es UI, no autorizacion).
+    createdBy: room.createdBy ?? null,
     joined,
     inviteCode: joined ? room.inviteCode : null,
   };
@@ -434,19 +451,25 @@ export function registerChatHandlers(io) {
       }
     });
 
-    // Borrar un mensaje propio. Solo el autor puede (limite de confianza: se
-    // valida en el server, no se confia en que el cliente oculte el boton).
+    // Borrar un mensaje de sala: el autor siempre puede; el creador de la
+    // sala puede borrar mensajes ajenos (moderacion). Limite de confianza:
+    // se valida en el server, no se confia en que el cliente oculte el boton.
     socket.on('room:message:delete', async (payload, ack) => {
       const id = typeof payload?.id === 'string' ? payload.id : '';
       if (!id) return ack?.({ error: 'Falta el id del mensaje.' });
       try {
         const msg = await prisma.message.findUnique({
           where: { id },
-          select: { id: true, senderId: true, roomId: true },
+          select: {
+            id: true,
+            senderId: true,
+            roomId: true,
+            room: { select: { createdBy: true } },
+          },
         });
         // Debe ser un mensaje de sala (los DM se borran por su propio evento).
         if (!msg || !msg.roomId) return ack?.({ error: 'El mensaje no existe.' });
-        if (msg.senderId !== user.id) {
+        if (msg.senderId !== user.id && !canModerate(msg.room, user.id)) {
           return ack?.({ error: 'No podes borrar este mensaje.' });
         }
         await prisma.message.delete({ where: { id } });
@@ -780,6 +803,119 @@ export function registerChatHandlers(io) {
       } catch (err) {
         console.error('Error reaccionando:', err.message);
         ack?.({ error: 'No se pudo reaccionar.' });
+      }
+    });
+
+    // Fijar/desfijar un mensaje de sala (toggle, estilo Slack: cualquier
+    // miembro). Hay que poder VER la sala (socket.rooms) para fijar.
+    socket.on('message:pin', async (payload, ack) => {
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      if (!id) return ack?.({ error: 'Falta el id del mensaje.' });
+      try {
+        const msg = await prisma.message.findUnique({
+          where: { id },
+          select: { id: true, roomId: true, pinnedAt: true },
+        });
+        if (!msg || !msg.roomId) return ack?.({ error: 'El mensaje no existe.' });
+        if (!socket.rooms.has(socketRoom(msg.roomId))) {
+          return ack?.({ error: 'No eres miembro de esta sala.' });
+        }
+        const updated = await prisma.message.update({
+          where: { id },
+          data: { pinnedAt: msg.pinnedAt ? null : new Date() },
+          select: { id: true, pinnedAt: true },
+        });
+        io.to(socketRoom(msg.roomId)).emit('message:pinned', updated);
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error fijando mensaje:', err.message);
+        ack?.({ error: 'No se pudo fijar el mensaje.' });
+      }
+    });
+
+    // Mensajes fijados de una sala (los pide el cliente al abrir el panel).
+    socket.on('room:pins', async (payload, ack) => {
+      const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
+      if (!roomId) return ack?.({ error: 'Falta la sala.' });
+      if (!socket.rooms.has(socketRoom(roomId))) {
+        return ack?.({ error: 'No eres miembro de esta sala.' });
+      }
+      try {
+        const pins = await prisma.message.findMany({
+          where: { roomId, pinnedAt: { not: null } },
+          orderBy: { pinnedAt: 'desc' },
+          take: MESSAGE_HISTORY_LIMIT,
+          include: MESSAGE_INCLUDE,
+        });
+        ack?.({ messages: pins.map(toClientMessage) });
+      } catch (err) {
+        console.error('Error cargando fijados:', err.message);
+        ack?.({ error: 'No se pudieron cargar los fijados.' });
+      }
+    });
+
+    // Busqueda de mensajes en la conversacion abierta: una sala (roomId, null
+    // = global) o un DM (withUserId). Se responde por ack, solo a quien busca.
+    // ponytail: ILIKE con contains, sin indice full-text; a este volumen sobra.
+    socket.on('messages:search', async (payload, ack) => {
+      const q = normalizeSearchQuery(payload?.q);
+      if (!q) return ack?.({ error: 'Escribe al menos 2 caracteres.' });
+      const withUserId = typeof payload?.withUserId === 'string' ? payload.withUserId : null;
+      try {
+        let where;
+        if (withUserId) {
+          where = {
+            OR: [
+              { senderId: user.id, recipientId: withUserId },
+              { senderId: withUserId, recipientId: user.id },
+            ],
+          };
+        } else {
+          const roomId =
+            typeof payload?.roomId === 'string' ? payload.roomId : await getGlobalRoomId();
+          if (!socket.rooms.has(socketRoom(roomId))) {
+            return ack?.({ error: 'No eres miembro de esta sala.' });
+          }
+          where = { roomId };
+        }
+        const results = await prisma.message.findMany({
+          where: { ...where, content: { contains: q, mode: 'insensitive' } },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          include: MESSAGE_INCLUDE,
+        });
+        ack?.({ messages: results.map(toClientMessage) });
+      } catch (err) {
+        console.error('Error buscando mensajes:', err.message);
+        ack?.({ error: 'No se pudo buscar.' });
+      }
+    });
+
+    // Expulsar a un miembro de una sala. Solo el creador (limite de confianza,
+    // validado aca); no puede expulsarse a si mismo (para eso esta room:leave).
+    socket.on('room:kick', async (payload, ack) => {
+      const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
+      const targetId = typeof payload?.userId === 'string' ? payload.userId : '';
+      if (!roomId || !targetId) return ack?.({ error: 'Faltan datos.' });
+      if (targetId === user.id) return ack?.({ error: 'No puedes expulsarte a ti mismo.' });
+      try {
+        const room = await prisma.room.findUnique({ where: { id: roomId } });
+        if (!room) return ack?.({ error: 'La sala no existe.' });
+        if (!canModerate(room, user.id)) {
+          return ack?.({ error: 'Solo el creador puede expulsar.' });
+        }
+        const removed = await prisma.roomMember.deleteMany({
+          where: { userId: targetId, roomId },
+        });
+        if (removed.count === 0) return ack?.({ error: 'Ese usuario no es miembro.' });
+        // Todas las pestañas del expulsado dejan de recibir la sala, y su
+        // cliente la quita del sidebar al recibir room:kicked.
+        io.in(`user:${targetId}`).socketsLeave(socketRoom(roomId));
+        io.to(`user:${targetId}`).emit('room:kicked', { roomId, name: room.name });
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error expulsando miembro:', err.message);
+        ack?.({ error: 'No se pudo expulsar.' });
       }
     });
 
