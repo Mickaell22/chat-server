@@ -214,6 +214,7 @@ que está vivo.
 | `POST` | `/api/users/me/avatar` | Subir/actualizar la foto de perfil (multipart, campo `avatar`) | Sí |
 | `PATCH` | `/api/users/me` | Actualizar alias, bio y/o color de perfil | Sí |
 | `GET` | `/api/users/:id` | Ver el perfil público de un usuario (con su presencia) | Sí |
+| `POST` | `/api/uploads/image` | Subir una imagen de chat (multipart, campo `image`, máx 5 MB); devuelve `{ url }` para enviarla como `imageUrl` por socket | Sí |
 
 > Las rutas de chat se manejan por WebSocket, no por HTTP.
 
@@ -221,21 +222,30 @@ que está vivo.
 
 ## Eventos de WebSocket
 
-| Evento | Dirección | Descripción | Estado |
-|--------|-----------|-------------|--------|
-| `users:online` | server → cliente | Lista de usuarios conectados (avatar, alias, status) | Implementado |
-| `presence:set` | cliente → server | Cambiar el estado propio (`online`/`dnd`/`invisible`) | Implementado |
-| `room:history` | server → cliente | Últimos N mensajes al entrar a una sala | Implementado |
-| `room:message` | bidireccional | Mensaje dentro de una sala (hoy: la global) | Implementado |
-| `room:join` | cliente → server | Unirse a una sala | Pendiente (salas múltiples) |
-| `room:leave` | cliente → server | Salir de una sala | Pendiente (salas múltiples) |
-| `dm:message` | bidireccional | Mensaje privado entre dos usuarios | Pendiente (DM) |
+| Evento | Dirección | Descripción |
+|--------|-----------|-------------|
+| `users:online` | server → cliente | Lista de usuarios conectados (avatar, alias, status) |
+| `presence:set` | cliente → server | Cambiar el estado propio (`online`/`dnd`/`invisible`) |
+| `rooms:list` | server → cliente | Salas visibles al conectar: públicas + privadas propias (con `joined` e `inviteCode` si es miembro) |
+| `room:history` | server → cliente (al conectar) / cliente → server (ack) | Historia de la global al conectar; historial de otra sala bajo demanda |
+| `room:message` | bidireccional | Mensaje a una sala (`roomId` opcional, null = global). Acepta `replyToId` e `imageUrl` |
+| `room:message:delete` / `room:message:deleted` | cliente → server / server → sala | Borrar un mensaje propio de sala |
+| `room:create` | cliente → server (ack) | Crear sala (`name`, `isPrivate`); el creador queda como miembro |
+| `room:created` | server → todos | Anuncio de sala pública nueva (las privadas no se anuncian) |
+| `room:join` | cliente → server (ack) | Unirse por `roomId` (solo públicas) o por `code` de invitación (cualquiera) |
+| `room:leave` | cliente → server (ack) | Salir de una sala |
+| `dm:conversations` | server → cliente | Conversaciones DM existentes al conectar (partner + fecha del último mensaje) |
+| `dm:history` | cliente → server (ack) | Últimos N mensajes con un usuario |
+| `dm:message` | bidireccional | Mensaje privado. Acepta `replyToId` e `imageUrl` |
+| `dm:message:delete` / `dm:message:deleted` | cliente → server / server → ambos extremos | Borrar un DM propio |
+| `typing:start` / `typing:stop` | bidireccional | Indicador de "escribiendo" (relay efímero, no persiste) |
 
 > El JWT se envía en `auth: { token }` durante el handshake y se valida con un
 > middleware `io.use(...)` antes de aceptar la conexión.
 >
-> Hoy está implementada la **sala global** con usuarios online y persistencia.
-> Las salas múltiples y los DM son los siguientes incrementos.
+> Las invitaciones a salas viajan como un DM cuyo contenido es
+> `pub:invite/<código>/<nombre>`; el cliente lo renderiza como una tarjeta con
+> botón "Unirse".
 
 ---
 

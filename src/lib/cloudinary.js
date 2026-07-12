@@ -30,3 +30,23 @@ export function uploadAvatar(buffer, userId) {
     stream.end(buffer);
   });
 }
+
+// Imagen de un mensaje del chat. public_id aleatorio (cada imagen es nueva) y
+// segunda red de seguridad server-side: aunque el cliente ya comprime con
+// canvas, Cloudinary limita dimensiones y recomprime lo que se guarda.
+export function uploadChatImage(buffer) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: 'chat/messages',
+        resource_type: 'image',
+        transformation: [
+          { width: 1600, height: 1600, crop: 'limit' },
+          { quality: 'auto:good' },
+        ],
+      },
+      (err, result) => (err ? reject(err) : resolve(result.secure_url)),
+    );
+    stream.end(buffer);
+  });
+}

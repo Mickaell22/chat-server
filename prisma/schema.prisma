@@ -68,6 +68,10 @@ model RoomMember {
 model Message {
   id          String   @id @default(uuid())
   content     String
+  // Imagen adjunta (URL de Cloudinary, subida por HTTP antes de emitir el
+  // mensaje). Un mensaje puede ser solo imagen (content vacio), solo texto,
+  // o ambos (imagen con caption).
+  imageUrl    String?
   senderId    String
   roomId      String?
   recipientId String?
