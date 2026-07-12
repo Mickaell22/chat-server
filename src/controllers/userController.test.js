@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 process.env.DATABASE_URL = 'postgresql://test';
 process.env.JWT_SECRET = 'test';
 
-const { friendshipStateFor } = await import('./userController.js');
+const { friendshipStateFor, otherEnds } = await import('./userController.js');
 
 // Sin vinculo o rechazado: se puede (re)enviar solicitud.
 assert.equal(friendshipStateFor(null, 'yo'), 'none');
@@ -17,5 +17,18 @@ assert.equal(friendshipStateFor({ state: 'PENDING', userId: 'otro', friendId: 'y
 // Aceptada y bloqueada.
 assert.equal(friendshipStateFor({ state: 'ACCEPTED', userId: 'otro' }, 'yo'), 'friends');
 assert.equal(friendshipStateFor({ state: 'BLOCKED', userId: 'otro' }, 'yo'), 'blocked');
+
+// otherEnds: devuelve el otro lado de cada amistad, sin importar la direccion.
+assert.deepEqual(
+  otherEnds(
+    [
+      { userId: 'yo', friendId: 'ana' },
+      { userId: 'beto', friendId: 'yo' },
+    ],
+    'yo',
+  ),
+  ['ana', 'beto'],
+);
+assert.deepEqual(otherEnds([], 'yo'), []);
 
 console.log('userController.test OK');

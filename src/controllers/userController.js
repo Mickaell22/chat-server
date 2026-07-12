@@ -28,6 +28,12 @@ export async function updateAvatar(req, res) {
   }
 }
 
+// Ids del "otro extremo" de una lista de amistades de `selfId` (cada fila
+// puede tenerlo como emisor o receptor). Pura para poder testearla.
+export function otherEnds(rows, selfId) {
+  return rows.map((r) => (r.userId === selfId ? r.friendId : r.userId));
+}
+
 // Estado de amistad entre viewer y target, visto desde el viewer. Pura para
 // poder testearla. REJECTED cuenta como 'none': se puede volver a enviar (el
 // friendshipController reactiva la fila en vez de duplicarla).
@@ -60,11 +66,55 @@ export async function getUserProfile(req, res) {
       });
       friendship = { state: friendshipStateFor(row, req.user.id), id: row?.id ?? null };
     }
+
+    // Lo que comparten viewer y target: salas (sin la global, que es de
+    // todos) y amigos aceptados en comun.
+    let common = { rooms: [], friends: { count: 0, names: [] } };
+    if (user.id !== req.user.id) {
+      const [mine, theirs] = await Promise.all([
+        prisma.roomMember.findMany({ where: { userId: req.user.id }, select: { roomId: true } }),
+        prisma.roomMember.findMany({ where: { userId: user.id }, select: { roomId: true } }),
+      ]);
+      const myIds = new Set(mine.map((m) => m.roomId));
+      const sharedRoomIds = theirs.map((m) => m.roomId).filter((id) => myIds.has(id));
+      if (sharedRoomIds.length > 0) {
+        const rooms = await prisma.room.findMany({
+          where: { id: { in: sharedRoomIds } },
+          select: { name: true },
+          orderBy: { name: 'asc' },
+        });
+        common.rooms = rooms.map((r) => r.name);
+      }
+
+      const acceptedOf = (id) =>
+        prisma.friendship.findMany({
+          where: { state: 'ACCEPTED', OR: [{ userId: id }, { friendId: id }] },
+          select: { userId: true, friendId: true },
+        });
+      const [myFriendRows, theirFriendRows] = await Promise.all([
+        acceptedOf(req.user.id),
+        acceptedOf(user.id),
+      ]);
+      const myFriends = new Set(otherEnds(myFriendRows, req.user.id));
+      const shared = otherEnds(theirFriendRows, user.id).filter((id) => myFriends.has(id));
+      if (shared.length > 0) {
+        const friends = await prisma.user.findMany({
+          where: { id: { in: shared.slice(0, 3) } },
+          select: { username: true, alias: true },
+        });
+        common.friends = {
+          count: shared.length,
+          names: friends.map((f) => f.alias || f.username),
+        };
+      }
+    }
+
     return res.json({
       user: {
         ...publicProfile(user),
         status: getPresenceStatus(user.id, req.user.id),
         friendship,
+        common,
       },
     });
   } catch (err) {
