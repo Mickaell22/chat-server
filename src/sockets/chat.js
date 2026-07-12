@@ -8,6 +8,8 @@ import {
   ROOM_NAME_MIN_LENGTH,
   ROOM_NAME_MAX_LENGTH,
   REACTION_EMOJIS,
+  MESSAGE_BURST,
+  MESSAGE_REFILL_PER_SEC,
 } from '../config/constants.js';
 
 // Presencia en memoria: userId -> { username, count, status }. count cuenta
@@ -212,6 +214,26 @@ function isSameDmPair(msg, a, b) {
   );
 }
 
+// Token bucket puro: devuelve si hay token y el estado nuevo del bucket.
+// Los tokens se recargan de forma continua con el tiempo transcurrido.
+export function takeToken(bucket, now, burst = MESSAGE_BURST, refillPerSec = MESSAGE_REFILL_PER_SEC) {
+  const tokens = Math.min(burst, bucket.tokens + ((now - bucket.last) / 1000) * refillPerSec);
+  if (tokens < 1) return { ok: false, bucket: { tokens, last: now } };
+  return { ok: true, bucket: { tokens: tokens - 1, last: now } };
+}
+
+// Rate limit de mensajes por usuario. En memoria, un proceso (como la
+// presencia). Limite de confianza: evita que un cliente hostil inunde las
+// salas por el socket.
+const messageBuckets = new Map();
+function allowMessage(userId) {
+  const now = Date.now();
+  const cur = messageBuckets.get(userId) ?? { tokens: MESSAGE_BURST, last: now };
+  const { ok, bucket } = takeToken(cur, now);
+  messageBuckets.set(userId, bucket);
+  return ok;
+}
+
 // chatKey valido para marcas de lectura (input no confiable): 'room:<id>' o
 // 'dm:<id>' con ids uuid-ish. Pura para poder testearla.
 export function isValidChatKey(key) {
@@ -366,6 +388,9 @@ export function registerChatHandlers(io) {
     // Mensaje a una sala (global si no viene roomId). El payload del socket
     // es input no confiable: se valida y recorta antes de tocar la DB.
     socket.on('room:message', async (payload, ack) => {
+      if (!allowMessage(user.id)) {
+        return ack?.({ error: 'Estas enviando muy rapido; espera un momento.' });
+      }
       const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
       const imageUrl = typeof payload?.imageUrl === 'string' ? payload.imageUrl : null;
       if (imageUrl && !isOwnImageUrl(imageUrl)) return ack?.({ error: 'Imagen invalida.' });
@@ -598,6 +623,9 @@ export function registerChatHandlers(io) {
     // Mensaje privado. Mismas validaciones de contenido que la sala; ademas el
     // destinatario debe existir (input no confiable) y no ser uno mismo.
     socket.on('dm:message', async (payload, ack) => {
+      if (!allowMessage(user.id)) {
+        return ack?.({ error: 'Estas enviando muy rapido; espera un momento.' });
+      }
       const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
       const imageUrl = typeof payload?.imageUrl === 'string' ? payload.imageUrl : null;
       if (imageUrl && !isOwnImageUrl(imageUrl)) return ack?.({ error: 'Imagen invalida.' });
