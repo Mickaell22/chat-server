@@ -41,6 +41,11 @@ model Room {
   // Opcional: la sala global es "del sistema" (sin creador). Las salas que
   // crean los usuarios si llevan createdBy.
   createdBy String?
+  // Una sala privada no aparece en la lista publica: solo se entra con su
+  // codigo de invitacion. Toda sala de usuario tiene inviteCode (tambien las
+  // publicas, para poder invitar por DM); la global no tiene (null).
+  isPrivate  Boolean @default(false)
+  inviteCode String? @unique
   createdAt DateTime @default(now())
 
   creator  User?        @relation("RoomCreator", fields: [createdBy], references: [id])
