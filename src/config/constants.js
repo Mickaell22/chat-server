@@ -15,6 +15,11 @@ export const MAX_MESSAGE_LENGTH = 2000;
 export const ROOM_NAME_MIN_LENGTH = 2;
 export const ROOM_NAME_MAX_LENGTH = 24;
 
+// Rate limit de mensajes por usuario (token bucket): hasta MESSAGE_BURST de
+// golpe, se recargan a MESSAGE_REFILL_PER_SEC por segundo.
+export const MESSAGE_BURST = 5;
+export const MESSAGE_REFILL_PER_SEC = 1;
+
 // Paleta cerrada de reacciones (limite de confianza: el server no acepta
 // otro emoji). Mantener en sync con REACTION_EMOJIS del cliente.
 export const REACTION_EMOJIS = ['\u{1F44D}', '\u2764\uFE0F', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F525}'];

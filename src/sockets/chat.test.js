@@ -5,7 +5,7 @@ process.env.DATABASE_URL = 'postgresql://test';
 // chat.js ahora importa env.js (para validar imageUrl), que exige JWT_SECRET.
 process.env.JWT_SECRET = 'test';
 
-const { isVisibleTo, mergeDmPartners, normalizeRoomName, summarizeReactions, isValidChatKey } = await import('./chat.js');
+const { isVisibleTo, mergeDmPartners, normalizeRoomName, summarizeReactions, isValidChatKey, takeToken } = await import('./chat.js');
 
 // Online/dnd: visibles para cualquiera.
 assert.equal(isVisibleTo({ status: 'online', userId: 'u1' }, 'u2'), true);
@@ -73,5 +73,20 @@ assert.equal(isValidChatKey('global'), false);
 assert.equal(isValidChatKey('room:'), false);
 assert.equal(isValidChatKey(`room:${uuid}; DROP TABLE`), false);
 assert.equal(isValidChatKey(null), false);
+
+// takeToken: rafaga completa, luego bloqueo, luego recarga con el tiempo.
+let b = { tokens: 3, last: 0 };
+for (let i = 0; i < 3; i++) {
+  const r = takeToken(b, 0, 3, 1);
+  assert.equal(r.ok, true, `token ${i + 1} de la rafaga`);
+  b = r.bucket;
+}
+assert.equal(takeToken(b, 0, 3, 1).ok, false); // rafaga agotada
+assert.equal(takeToken(b, 500, 3, 1).ok, false); // 0.5s: aun sin token entero
+const recarga = takeToken(b, 1100, 3, 1); // 1.1s: se recargo 1 token
+assert.equal(recarga.ok, true);
+// nunca acumula mas que el burst
+const lleno = takeToken({ tokens: 3, last: 0 }, 999999, 3, 1);
+assert.ok(lleno.bucket.tokens <= 3);
 
 console.log('chat.test OK');
