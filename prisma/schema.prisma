@@ -82,6 +82,9 @@ model Message {
   replyToId   String?
   // Ultima edicion del contenido (null = nunca editado). Solo el autor edita.
   editedAt    DateTime?
+  // Fijado en su sala (null = no fijado). Solo aplica a mensajes de sala;
+  // cualquier miembro fija/desfija (estilo Slack, sin permisos finos).
+  pinnedAt    DateTime?
   createdAt   DateTime @default(now())
 
   sender    User      @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
