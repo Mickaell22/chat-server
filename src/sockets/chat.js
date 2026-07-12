@@ -91,10 +91,12 @@ async function getGlobalRoomId() {
   return globalRoomId;
 }
 
-// include reutilizable: remitente + el mensaje citado (con su autor) si lo hay.
+// include reutilizable: remitente, destinatario (solo DM) y el mensaje citado
+// (con su autor) si lo hay.
 const SENDER_SELECT = { id: true, username: true, alias: true, avatarUrl: true };
 const MESSAGE_INCLUDE = {
   sender: { select: SENDER_SELECT },
+  recipient: { select: SENDER_SELECT },
   replyTo: { include: { sender: { select: SENDER_SELECT } } },
 };
 
@@ -109,8 +111,12 @@ function toClientMessage(msg) {
     id: msg.id,
     content: msg.content,
     roomId: msg.roomId,
+    recipientId: msg.recipientId ?? null,
     createdAt: msg.createdAt,
     sender: toClientSender(msg.sender),
+    // Solo en DMs: el otro extremo completo, para que cualquier pestaña del
+    // remitente pueda pintar la conversacion aunque no la tuviera abierta.
+    recipient: msg.recipient ? toClientSender(msg.recipient) : null,
     replyTo: msg.replyTo
       ? {
           id: msg.replyTo.id,
@@ -119,6 +125,59 @@ function toClientMessage(msg) {
         }
       : null,
   };
+}
+
+// Une los dos groupBy de DMs (enviados por destinatario, recibidos por
+// remitente) en un mapa partnerId -> fecha del ultimo mensaje, quedandose con
+// la mas reciente por partner. Pura para poder testearla.
+export function mergeDmPartners(sent, received) {
+  const lastByPartner = new Map();
+  for (const row of sent) {
+    lastByPartner.set(row.recipientId, row._max.createdAt);
+  }
+  for (const row of received) {
+    const prev = lastByPartner.get(row.senderId);
+    if (!prev || row._max.createdAt > prev) {
+      lastByPartner.set(row.senderId, row._max.createdAt);
+    }
+  }
+  return lastByPartner;
+}
+
+// Conversaciones DM de un usuario: cada partner con el que intercambio
+// mensajes, con la fecha del ultimo, ordenadas de mas reciente a mas vieja.
+async function dmConversations(userId) {
+  const [sent, received] = await Promise.all([
+    prisma.message.groupBy({
+      by: ['recipientId'],
+      where: { senderId: userId, recipientId: { not: null } },
+      _max: { createdAt: true },
+    }),
+    prisma.message.groupBy({
+      by: ['senderId'],
+      where: { recipientId: userId },
+      _max: { createdAt: true },
+    }),
+  ]);
+  const lastByPartner = mergeDmPartners(sent, received);
+  if (lastByPartner.size === 0) return [];
+  const users = await prisma.user.findMany({
+    where: { id: { in: [...lastByPartner.keys()] } },
+    select: SENDER_SELECT,
+  });
+  return users
+    .map((u) => ({ user: toClientSender(u), lastMessageAt: lastByPartner.get(u.id) }))
+    .sort((a, b) => new Date(b.lastMessageAt) - new Date(a.lastMessageAt));
+}
+
+// true si el mensaje es un DM entre exactamente estos dos usuarios (en
+// cualquier direccion). Usado para validar replyToId dentro de un DM.
+function isSameDmPair(msg, a, b) {
+  return (
+    Boolean(msg.recipientId) &&
+    ((msg.senderId === a && msg.recipientId === b) ||
+      (msg.senderId === b && msg.recipientId === a))
+  );
 }
 
 export function registerChatHandlers(io) {
@@ -152,6 +211,13 @@ export function registerChatHandlers(io) {
       });
     } catch (err) {
       console.error('Error cargando historia global:', err.message);
+    }
+
+    // Conversaciones DM existentes, para pintar el sidebar al entrar.
+    try {
+      socket.emit('dm:conversations', await dmConversations(user.id));
+    } catch (err) {
+      console.error('Error cargando conversaciones DM:', err.message);
     }
 
     // Mensaje a la sala global. El payload del socket es input no confiable:
@@ -206,6 +272,105 @@ export function registerChatHandlers(io) {
         ack?.({ ok: true });
       } catch (err) {
         console.error('Error borrando mensaje:', err.message);
+        ack?.({ error: 'No se pudo borrar el mensaje.' });
+      }
+    });
+
+    // Historial de un DM: ultimos N mensajes entre este usuario y otro, en
+    // orden cronologico. Se responde por ack (solo lo pide quien abre el DM).
+    socket.on('dm:history', async (payload, ack) => {
+      const withUserId = typeof payload?.withUserId === 'string' ? payload.withUserId : '';
+      if (!withUserId) return ack?.({ error: 'Falta el usuario.' });
+      try {
+        const history = await prisma.message.findMany({
+          where: {
+            OR: [
+              { senderId: user.id, recipientId: withUserId },
+              { senderId: withUserId, recipientId: user.id },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          take: MESSAGE_HISTORY_LIMIT,
+          include: MESSAGE_INCLUDE,
+        });
+        ack?.({ messages: history.reverse().map(toClientMessage) });
+      } catch (err) {
+        console.error('Error cargando historia DM:', err.message);
+        ack?.({ error: 'No se pudo cargar la conversacion.' });
+      }
+    });
+
+    // Mensaje privado. Mismas validaciones de contenido que la sala; ademas el
+    // destinatario debe existir (input no confiable) y no ser uno mismo.
+    socket.on('dm:message', async (payload, ack) => {
+      const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
+      if (!content) return ack?.({ error: 'Mensaje vacio.' });
+      if (content.length > MAX_MESSAGE_LENGTH) {
+        return ack?.({ error: 'Mensaje demasiado largo.' });
+      }
+      const toUserId = typeof payload?.toUserId === 'string' ? payload.toUserId : '';
+      if (!toUserId) return ack?.({ error: 'Falta el destinatario.' });
+      if (toUserId === user.id) {
+        return ack?.({ error: 'No puedes enviarte mensajes a ti mismo.' });
+      }
+      const replyToId = typeof payload?.replyToId === 'string' ? payload.replyToId : null;
+      try {
+        const recipient = await prisma.user.findUnique({
+          where: { id: toUserId },
+          select: { id: true },
+        });
+        if (!recipient) return ack?.({ error: 'El destinatario no existe.' });
+        // Solo se puede citar un mensaje de ESTA misma conversacion.
+        let validReplyToId = null;
+        if (replyToId) {
+          const parent = await prisma.message.findUnique({
+            where: { id: replyToId },
+            select: { id: true, senderId: true, recipientId: true },
+          });
+          if (parent && isSameDmPair(parent, user.id, toUserId)) {
+            validReplyToId = parent.id;
+          }
+        }
+        const msg = await prisma.message.create({
+          data: {
+            content,
+            senderId: user.id,
+            recipientId: toUserId,
+            replyToId: validReplyToId,
+          },
+          include: MESSAGE_INCLUDE,
+        });
+        // A las rooms personales de ambos extremos: cubre todas las pestañas
+        // del destinatario Y las del remitente (incluida la que envio).
+        io.to(`user:${toUserId}`).to(`user:${user.id}`).emit('dm:message', toClientMessage(msg));
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error guardando DM:', err.message);
+        ack?.({ error: 'No se pudo enviar el mensaje.' });
+      }
+    });
+
+    // Borrar un DM propio. Igual que en la sala: solo el autor (limite de
+    // confianza, validado server-side).
+    socket.on('dm:message:delete', async (payload, ack) => {
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      if (!id) return ack?.({ error: 'Falta el id del mensaje.' });
+      try {
+        const msg = await prisma.message.findUnique({
+          where: { id },
+          select: { id: true, senderId: true, recipientId: true },
+        });
+        if (!msg || !msg.recipientId) return ack?.({ error: 'El mensaje no existe.' });
+        if (msg.senderId !== user.id) {
+          return ack?.({ error: 'No puedes borrar este mensaje.' });
+        }
+        await prisma.message.delete({ where: { id } });
+        io.to(`user:${msg.senderId}`)
+          .to(`user:${msg.recipientId}`)
+          .emit('dm:message:deleted', { id });
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error borrando DM:', err.message);
         ack?.({ error: 'No se pudo borrar el mensaje.' });
       }
     });
