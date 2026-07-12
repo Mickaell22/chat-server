@@ -28,15 +28,44 @@ export async function updateAvatar(req, res) {
   }
 }
 
+// Estado de amistad entre viewer y target, visto desde el viewer. Pura para
+// poder testearla. REJECTED cuenta como 'none': se puede volver a enviar (el
+// friendshipController reactiva la fila en vez de duplicarla).
+export function friendshipStateFor(friendship, viewerId) {
+  if (!friendship || friendship.state === 'REJECTED') return 'none';
+  if (friendship.state === 'ACCEPTED') return 'friends';
+  if (friendship.state === 'BLOCKED') return 'blocked';
+  // PENDING: la direccion dice quien la envio.
+  return friendship.userId === viewerId ? 'pending_sent' : 'pending_received';
+}
+
 // GET /api/users/:id  (requireAuth)
 // Perfil publico de otro usuario (o el propio), con su presencia tal como la
-// veria quien pregunta (invisible aparece 'offline' salvo para si mismo).
+// veria quien pregunta (invisible aparece 'offline' salvo para si mismo) y el
+// estado de amistad entre ambos (para el boton contextual del modal).
 export async function getUserProfile(req, res) {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    let friendship = { state: 'self', id: null };
+    if (user.id !== req.user.id) {
+      // El vinculo puede existir en cualquier direccion (unique por par).
+      const row = await prisma.friendship.findFirst({
+        where: {
+          OR: [
+            { userId: req.user.id, friendId: user.id },
+            { userId: user.id, friendId: req.user.id },
+          ],
+        },
+      });
+      friendship = { state: friendshipStateFor(row, req.user.id), id: row?.id ?? null };
+    }
     return res.json({
-      user: { ...publicProfile(user), status: getPresenceStatus(user.id, req.user.id) },
+      user: {
+        ...publicProfile(user),
+        status: getPresenceStatus(user.id, req.user.id),
+        friendship,
+      },
     });
   } catch (err) {
     console.error('Error obteniendo perfil:', err.message);
