@@ -34,6 +34,7 @@ model User {
   sentFriendRequests     Friendship[] @relation("RequestSender")
   receivedFriendRequests Friendship[] @relation("RequestReceiver")
   reactions              Reaction[]
+  readMarks              ReadMark[]
 }
 
 model Room {
@@ -107,6 +108,20 @@ model Reaction {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([messageId, userId, emoji])
+}
+
+// Hasta cuando leyo el usuario cada conversacion. chatKey usa el formato
+// 'room:<roomId>' (incluida la global, por su id real) o 'dm:<partnerId>'.
+// La fila se crea la primera vez que el usuario ABRE la conversacion; sin
+// fila, los no leidos de esa conversacion cuentan 0 (techo aceptado).
+model ReadMark {
+  userId     String
+  chatKey    String
+  lastReadAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, chatKey])
 }
 
 //una amistad requiere de dos usuarios

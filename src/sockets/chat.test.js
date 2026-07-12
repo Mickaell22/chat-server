@@ -5,7 +5,7 @@ process.env.DATABASE_URL = 'postgresql://test';
 // chat.js ahora importa env.js (para validar imageUrl), que exige JWT_SECRET.
 process.env.JWT_SECRET = 'test';
 
-const { isVisibleTo, mergeDmPartners, normalizeRoomName, summarizeReactions } = await import('./chat.js');
+const { isVisibleTo, mergeDmPartners, normalizeRoomName, summarizeReactions, isValidChatKey } = await import('./chat.js');
 
 // Online/dnd: visibles para cualquiera.
 assert.equal(isVisibleTo({ status: 'online', userId: 'u1' }, 'u2'), true);
@@ -64,5 +64,14 @@ assert.equal(summary[0].emoji, '\u{1F44D}'); // orden de paleta, no de llegada
 assert.deepEqual(summary[0].userIds, ['u1', 'u3']);
 assert.deepEqual(summary[1].userIds, ['u2']);
 assert.deepEqual(summarizeReactions([]), []);
+
+// isValidChatKey: solo room:<uuid> o dm:<uuid>.
+const uuid = '123e4567-e89b-42d3-a456-426614174000';
+assert.equal(isValidChatKey(`room:${uuid}`), true);
+assert.equal(isValidChatKey(`dm:${uuid}`), true);
+assert.equal(isValidChatKey('global'), false);
+assert.equal(isValidChatKey('room:'), false);
+assert.equal(isValidChatKey(`room:${uuid}; DROP TABLE`), false);
+assert.equal(isValidChatKey(null), false);
 
 console.log('chat.test OK');
