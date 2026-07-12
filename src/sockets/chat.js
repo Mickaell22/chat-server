@@ -212,6 +212,39 @@ function isSameDmPair(msg, a, b) {
   );
 }
 
+// chatKey valido para marcas de lectura (input no confiable): 'room:<id>' o
+// 'dm:<id>' con ids uuid-ish. Pura para poder testearla.
+export function isValidChatKey(key) {
+  return typeof key === 'string' && /^(room|dm):[0-9a-f-]{36}$/.test(key);
+}
+
+// No leidos por conversacion segun las marcas de lectura del usuario. Solo
+// cuentan conversaciones CON marca (se crea al abrirla por primera vez) y
+// nunca los mensajes propios.
+async function unreadState(userId, roomIds) {
+  const marks = await prisma.readMark.findMany({ where: { userId } });
+  const byKey = new Map(marks.map((m) => [m.chatKey, m.lastReadAt]));
+  const state = {};
+  await Promise.all(
+    [...byKey.entries()].map(async ([chatKey, since]) => {
+      const [kind, id] = chatKey.split(':');
+      let count = 0;
+      if (kind === 'room') {
+        if (!roomIds.has(id)) return; // ya no es miembro
+        count = await prisma.message.count({
+          where: { roomId: id, createdAt: { gt: since }, senderId: { not: userId } },
+        });
+      } else {
+        count = await prisma.message.count({
+          where: { senderId: id, recipientId: userId, createdAt: { gt: since } },
+        });
+      }
+      if (count > 0) state[chatKey] = count;
+    }),
+  );
+  return state;
+}
+
 // Cursor de paginacion de historial: fecha limite superior (exclusiva) que
 // manda el cliente para pedir mensajes mas viejos. Input no confiable.
 function parseBefore(payload) {
@@ -315,6 +348,10 @@ export function registerChatHandlers(io) {
         roomId: globalId,
         messages: history.reverse().map(toClientMessage),
       });
+
+      // No leidos acumulados desde la ultima vez (persisten entre sesiones).
+      const roomIds = new Set([globalId, ...memberships.map((m) => m.roomId)]);
+      socket.emit('unread:state', await unreadState(user.id, roomIds));
     } catch (err) {
       console.error('Error inicializando salas:', err.message);
     }
@@ -715,6 +752,22 @@ export function registerChatHandlers(io) {
       } catch (err) {
         console.error('Error reaccionando:', err.message);
         ack?.({ error: 'No se pudo reaccionar.' });
+      }
+    });
+
+    // Marca "leido hasta ahora" de una conversacion. Se upsertea al abrirla
+    // y mientras llegan mensajes con la conversacion a la vista.
+    socket.on('read:mark', async (payload) => {
+      const chatKey = payload?.chatKey;
+      if (!isValidChatKey(chatKey)) return;
+      try {
+        await prisma.readMark.upsert({
+          where: { userId_chatKey: { userId: user.id, chatKey } },
+          create: { userId: user.id, chatKey },
+          update: { lastReadAt: new Date() },
+        });
+      } catch (err) {
+        console.error('Error marcando lectura:', err.message);
       }
     });
 
