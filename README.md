@@ -239,6 +239,11 @@ que está vivo.
 | `dm:message` | bidireccional | Mensaje privado. Acepta `replyToId` e `imageUrl` |
 | `dm:message:delete` / `dm:message:deleted` | cliente → server / server → ambos extremos | Borrar un DM propio |
 | `typing:start` / `typing:stop` | bidireccional | Indicador de "escribiendo" (relay efímero, no persiste) |
+| `call:invite` / `call:incoming` | cliente → server / server → destinatario | Invitar a una llamada de voz 1-a-1 (desde un DM) |
+| `call:accept` / `call:accepted` | cliente → server / server → quien llama | Aceptar la llamada (dispara la negociación WebRTC) |
+| `call:reject` / `call:rejected` | cliente → server / server → quien llama | Rechazar (o responder "ocupado") |
+| `call:signal` | bidireccional | Relay opaco de señalización WebRTC (SDP e ICE); el audio va P2P, no pasa por el server |
+| `call:hangup` / `call:ended` | cliente → server / server → el otro par | Colgar la llamada |
 
 > El JWT se envía en `auth: { token }` durante el handshake y se valida con un
 > middleware `io.use(...)` antes de aceptar la conexión.
