@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
+import { env } from '../config/env.js';
 import {
   GLOBAL_ROOM_NAME,
   MESSAGE_HISTORY_LIMIT,
@@ -109,10 +110,20 @@ function toClientSender(sender) {
 
 // Da forma al mensaje que viaja al cliente: plano, con el remitente embebido y,
 // si es una respuesta, una cita liviana del mensaje original.
+// Solo se aceptan imagenes de NUESTRO Cloudinary: el socket es input no
+// confiable y podria mandar cualquier URL como "imagen".
+function isOwnImageUrl(url) {
+  return (
+    Boolean(env.cloudinary.cloudName) &&
+    url.startsWith(`https://res.cloudinary.com/${env.cloudinary.cloudName}/`)
+  );
+}
+
 function toClientMessage(msg) {
   return {
     id: msg.id,
     content: msg.content,
+    imageUrl: msg.imageUrl ?? null,
     roomId: msg.roomId,
     recipientId: msg.recipientId ?? null,
     createdAt: msg.createdAt,
@@ -293,7 +304,10 @@ export function registerChatHandlers(io) {
     // es input no confiable: se valida y recorta antes de tocar la DB.
     socket.on('room:message', async (payload, ack) => {
       const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
-      if (!content) return ack?.({ error: 'Mensaje vacio.' });
+      const imageUrl = typeof payload?.imageUrl === 'string' ? payload.imageUrl : null;
+      if (imageUrl && !isOwnImageUrl(imageUrl)) return ack?.({ error: 'Imagen invalida.' });
+      // Un mensaje puede ser solo texto, solo imagen, o imagen con caption.
+      if (!content && !imageUrl) return ack?.({ error: 'Mensaje vacio.' });
       if (content.length > MAX_MESSAGE_LENGTH) {
         return ack?.({ error: 'Mensaje demasiado largo.' });
       }
@@ -321,7 +335,7 @@ export function registerChatHandlers(io) {
           if (parent && parent.roomId === roomId) validReplyToId = parent.id;
         }
         const msg = await prisma.message.create({
-          data: { content, senderId: user.id, roomId, replyToId: validReplyToId },
+          data: { content, imageUrl, senderId: user.id, roomId, replyToId: validReplyToId },
           include: MESSAGE_INCLUDE,
         });
         io.to(socketRoom(roomId)).emit('room:message', toClientMessage(msg));
@@ -484,7 +498,9 @@ export function registerChatHandlers(io) {
     // destinatario debe existir (input no confiable) y no ser uno mismo.
     socket.on('dm:message', async (payload, ack) => {
       const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
-      if (!content) return ack?.({ error: 'Mensaje vacio.' });
+      const imageUrl = typeof payload?.imageUrl === 'string' ? payload.imageUrl : null;
+      if (imageUrl && !isOwnImageUrl(imageUrl)) return ack?.({ error: 'Imagen invalida.' });
+      if (!content && !imageUrl) return ack?.({ error: 'Mensaje vacio.' });
       if (content.length > MAX_MESSAGE_LENGTH) {
         return ack?.({ error: 'Mensaje demasiado largo.' });
       }
@@ -514,6 +530,7 @@ export function registerChatHandlers(io) {
         const msg = await prisma.message.create({
           data: {
             content,
+            imageUrl,
             senderId: user.id,
             recipientId: toUserId,
             replyToId: validReplyToId,

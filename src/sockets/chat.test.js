@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgresql://test';
+// chat.js ahora importa env.js (para validar imageUrl), que exige JWT_SECRET.
+process.env.JWT_SECRET = 'test';
 
 const { isVisibleTo, mergeDmPartners, normalizeRoomName } = await import('./chat.js');
 
