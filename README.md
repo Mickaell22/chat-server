@@ -43,12 +43,26 @@ mensajería instantánea con salas múltiples y mensajes privados.
 
 - Autenticación de usuarios: **registro** e **inicio de sesión** con **JWT**.
 - Contraseñas almacenadas de forma segura con **bcrypt** (nunca en texto plano).
+- **Verificación de correo** y **recuperación de contraseña** (Resend).
 - Comunicación en **tiempo real** mediante **WebSockets** (Socket.IO).
 - **Validación del JWT en el handshake** del socket: nadie entra al chat sin autenticarse.
-- **Lista de usuarios conectados** en tiempo real.
-- **Salas de chat múltiples** (crear, unirse, salir).
+- **Lista de usuarios conectados** en tiempo real, con presencia manual
+  (conectado / no molestar / invisible).
+- **Salas de chat múltiples** (crear, unirse, salir), con salas **privadas**
+  por código de invitación.
 - **Mensajes privados** (DM) entre usuarios.
-- **Persistencia** de usuarios, salas e historial de mensajes en PostgreSQL.
+- Mensajes con **respuestas**, **edición**, **borrado**, **reacciones** con
+  emoji e **imágenes** (Cloudinary, con recompresión server-side).
+- **Historial paginado** (cursor `before`) y **no leídos persistentes** por
+  conversación (marcas de lectura).
+- **Amistades** (solicitudes, aceptar/rechazar) y perfil público con estado
+  de amistad, salas y amigos en común.
+- **Señalización WebRTC** para llamadas de voz/video 1-a-1 y canales de voz
+  grupales por sala (mesh con tope de participantes); el audio/video nunca
+  pasa por el servidor.
+- **Rate limiting** de mensajes por usuario (token bucket).
+- **Persistencia** de usuarios, salas, amistades, reacciones e historial de
+  mensajes en PostgreSQL.
 
 ---
 
@@ -94,7 +108,7 @@ mensajería instantánea con salas múltiples y mensajes privados.
 ```
 chat-server/
 ├── prisma/
-│   └── schema.prisma        # Modelo de datos (User, Room, RoomMember, Message)
+│   └── schema.prisma        # Modelo de datos (User, Room, Message, Reaction, ReadMark, Friendship...)
 ├── src/
 │   ├── index.js             # Entry point: levanta Express + Socket.IO
 │   ├── lib/prisma.js        # Cliente único de Prisma
@@ -192,9 +206,12 @@ que está vivo.
 | Entidad | Descripción |
 |---------|-------------|
 | **User** | Usuarios registrados (username, email, passwordHash, emailVerified, avatarUrl, alias, bio, profileColor). |
-| **Room** | Salas de chat. La sala global es "del sistema" (`createdBy` opcional). |
+| **Room** | Salas de chat. La sala global es "del sistema" (`createdBy` opcional). Las privadas llevan `isPrivate` + `inviteCode`. |
 | **RoomMember** | Relación usuario ↔ sala (quién está en qué sala). |
-| **Message** | Mensaje de sala (`roomId`) o privado (`recipientId`). |
+| **Message** | Mensaje de sala (`roomId`) o privado (`recipientId`), con `imageUrl`, `replyToId` y `editedAt` opcionales. |
+| **Reaction** | Reacción de un usuario a un mensaje con un emoji de la paleta cerrada (PK compuesta: toggle). |
+| **ReadMark** | Hasta cuándo leyó cada usuario cada conversación (base de los no leídos persistentes). |
+| **Friendship** | Solicitudes y vínculos de amistad (PENDING / ACCEPTED / REJECTED / BLOCKED). |
 
 > Un `Message` es de sala si tiene `roomId`, o un mensaje privado (DM) si tiene `recipientId`.
 
