@@ -555,6 +555,31 @@ export function registerChatHandlers(io) {
       }
     });
 
+    // Indicador de "escribiendo": relay efimero, no toca la DB. Para salas,
+    // la pertenencia se valida contra las rooms del propio socket (memoria);
+    // para DM se relaya a la room personal del destinatario. El cliente
+    // descarta por timeout si el stop se pierde.
+    const relayTyping = (event) => async (payload) => {
+      const toUserId = typeof payload?.toUserId === 'string' ? payload.toUserId : null;
+      const roomId = typeof payload?.roomId === 'string' ? payload.roomId : null;
+      const entry = online.get(user.id);
+      const typer = { id: user.id, username: user.username, alias: entry?.alias ?? null };
+      try {
+        if (toUserId) {
+          io.to(`user:${toUserId}`).emit(event, { user: typer, roomId: null });
+          return;
+        }
+        const globalId = await getGlobalRoomId();
+        const target = roomId ?? globalId;
+        if (!socket.rooms.has(socketRoom(target))) return;
+        socket.to(socketRoom(target)).emit(event, { user: typer, roomId: target });
+      } catch (err) {
+        console.error('Error relayando typing:', err.message);
+      }
+    };
+    socket.on('typing:start', relayTyping('typing:start'));
+    socket.on('typing:stop', relayTyping('typing:stop'));
+
     // Cambio manual de estado (online/dnd/invisible). Input no confiable: se
     // valida contra el enum antes de aplicar.
     socket.on('presence:set', (payload) => {
