@@ -78,6 +78,8 @@ model Message {
   // Respuesta a otro mensaje (estilo Discord). Opcional. Si se borra el mensaje
   // citado, la respuesta queda con replyToId null (SetNull), no se borra.
   replyToId   String?
+  // Ultima edicion del contenido (null = nunca editado). Solo el autor edita.
+  editedAt    DateTime?
   createdAt   DateTime @default(now())
 
   sender    User      @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)

@@ -124,6 +124,7 @@ function toClientMessage(msg) {
     id: msg.id,
     content: msg.content,
     imageUrl: msg.imageUrl ?? null,
+    editedAt: msg.editedAt ?? null,
     roomId: msg.roomId,
     recipientId: msg.recipientId ?? null,
     createdAt: msg.createdAt,
@@ -370,6 +371,38 @@ export function registerChatHandlers(io) {
       }
     });
 
+    // Editar un mensaje propio de sala. Mismas reglas de contenido que al
+    // enviar; solo el autor (limite de confianza, validado aca).
+    socket.on('room:message:edit', async (payload, ack) => {
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
+      if (!id) return ack?.({ error: 'Falta el id del mensaje.' });
+      if (!content) return ack?.({ error: 'Mensaje vacio.' });
+      if (content.length > MAX_MESSAGE_LENGTH) {
+        return ack?.({ error: 'Mensaje demasiado largo.' });
+      }
+      try {
+        const msg = await prisma.message.findUnique({
+          where: { id },
+          select: { id: true, senderId: true, roomId: true },
+        });
+        if (!msg || !msg.roomId) return ack?.({ error: 'El mensaje no existe.' });
+        if (msg.senderId !== user.id) {
+          return ack?.({ error: 'No puedes editar este mensaje.' });
+        }
+        const updated = await prisma.message.update({
+          where: { id },
+          data: { content, editedAt: new Date() },
+          select: { id: true, content: true, editedAt: true },
+        });
+        io.to(socketRoom(msg.roomId)).emit('room:message:edited', updated);
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error editando mensaje:', err.message);
+        ack?.({ error: 'No se pudo editar el mensaje.' });
+      }
+    });
+
     // Crear una sala. El creador queda como miembro y entra de una. Toda
     // sala nueva recibe codigo de invitacion (publicas y privadas).
     socket.on('room:create', async (payload, ack) => {
@@ -569,6 +602,39 @@ export function registerChatHandlers(io) {
       } catch (err) {
         console.error('Error borrando DM:', err.message);
         ack?.({ error: 'No se pudo borrar el mensaje.' });
+      }
+    });
+
+    // Editar un DM propio. Igual que en salas, hacia ambos extremos.
+    socket.on('dm:message:edit', async (payload, ack) => {
+      const id = typeof payload?.id === 'string' ? payload.id : '';
+      const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
+      if (!id) return ack?.({ error: 'Falta el id del mensaje.' });
+      if (!content) return ack?.({ error: 'Mensaje vacio.' });
+      if (content.length > MAX_MESSAGE_LENGTH) {
+        return ack?.({ error: 'Mensaje demasiado largo.' });
+      }
+      try {
+        const msg = await prisma.message.findUnique({
+          where: { id },
+          select: { id: true, senderId: true, recipientId: true },
+        });
+        if (!msg || !msg.recipientId) return ack?.({ error: 'El mensaje no existe.' });
+        if (msg.senderId !== user.id) {
+          return ack?.({ error: 'No puedes editar este mensaje.' });
+        }
+        const updated = await prisma.message.update({
+          where: { id },
+          data: { content, editedAt: new Date() },
+          select: { id: true, content: true, editedAt: true },
+        });
+        io.to(`user:${msg.senderId}`)
+          .to(`user:${msg.recipientId}`)
+          .emit('dm:message:edited', updated);
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error editando DM:', err.message);
+        ack?.({ error: 'No se pudo editar el mensaje.' });
       }
     });
 
