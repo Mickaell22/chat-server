@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgresql://test';
 
-const { isVisibleTo, mergeDmPartners } = await import('./chat.js');
+const { isVisibleTo, mergeDmPartners, normalizeRoomName } = await import('./chat.js');
 
 // Online/dnd: visibles para cualquiera.
 assert.equal(isVisibleTo({ status: 'online', userId: 'u1' }, 'u2'), true);
@@ -38,5 +38,16 @@ assert.equal(merged.get('caro'), d1); // solo recibido
 
 // Sin DMs: mapa vacio.
 assert.equal(mergeDmPartners([], []).size, 0);
+
+// normalizeRoomName: minusculas, espacios a guiones, valida charset/largo.
+assert.deepEqual(normalizeRoomName('  Mi Sala  '), { name: 'mi-sala' });
+assert.deepEqual(normalizeRoomName('juegos-2026'), { name: 'juegos-2026' });
+assert.deepEqual(normalizeRoomName('a  b   c'), { name: 'a-b-c' });
+assert.ok(normalizeRoomName('x').error); // muy corto
+assert.ok(normalizeRoomName('a'.repeat(30)).error); // muy largo
+assert.ok(normalizeRoomName('con ñ').error); // charset invalido
+assert.ok(normalizeRoomName('global').error); // reservado
+assert.ok(normalizeRoomName(undefined).error); // input basura
+assert.ok(normalizeRoomName('sala!').error); // simbolos
 
 console.log('chat.test OK');

@@ -11,6 +11,10 @@ export const MESSAGE_HISTORY_LIMIT = 50;
 // confiable). Se valida server-side antes de persistir.
 export const MAX_MESSAGE_LENGTH = 2000;
 
+// Salas: limites del nombre elegido por el usuario (limite de confianza).
+export const ROOM_NAME_MIN_LENGTH = 2;
+export const ROOM_NAME_MAX_LENGTH = 24;
+
 // Perfil: limites de los campos editables (limite de confianza).
 export const ALIAS_MAX_LENGTH = 40;
 export const BIO_MAX_LENGTH = 160;

@@ -1,8 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import {
   GLOBAL_ROOM_NAME,
   MESSAGE_HISTORY_LIMIT,
   MAX_MESSAGE_LENGTH,
+  ROOM_NAME_MIN_LENGTH,
+  ROOM_NAME_MAX_LENGTH,
 } from '../config/constants.js';
 
 // Presencia en memoria: userId -> { username, count, status }. count cuenta
@@ -180,6 +183,48 @@ function isSameDmPair(msg, a, b) {
   );
 }
 
+// Nombre de la room de Socket.IO para una sala de la DB.
+function socketRoom(roomId) {
+  return `room:${roomId}`;
+}
+
+// Normaliza el nombre de sala que manda el usuario (input no confiable):
+// minusculas, espacios a guiones, solo [a-z0-9-]. Pura para poder testearla.
+export function normalizeRoomName(raw) {
+  const name =
+    typeof raw === 'string'
+      ? raw.trim().toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-')
+      : '';
+  if (!/^[a-z0-9-]*$/.test(name)) {
+    return { error: 'Solo letras, numeros, espacios y guiones.' };
+  }
+  if (name.length < ROOM_NAME_MIN_LENGTH || name.length > ROOM_NAME_MAX_LENGTH) {
+    return {
+      error: `El nombre debe tener entre ${ROOM_NAME_MIN_LENGTH} y ${ROOM_NAME_MAX_LENGTH} caracteres.`,
+    };
+  }
+  if (name === GLOBAL_ROOM_NAME) return { error: 'Ese nombre esta reservado.' };
+  return { name };
+}
+
+// Vista de una sala para el cliente. El codigo de invitacion SOLO viaja a
+// miembros: un no-miembro no debe poder invitarse solo a una sala privada.
+function toClientRoom(room, joined) {
+  return {
+    id: room.id,
+    name: room.name,
+    isPrivate: room.isPrivate,
+    joined,
+    inviteCode: joined ? room.inviteCode : null,
+  };
+}
+
+// ponytail: 8 hex al azar, un solo intento; si chocara con el unique (P2002,
+// probabilidad ~nula) el usuario simplemente reintenta crear la sala.
+function newInviteCode() {
+  return randomBytes(4).toString('hex');
+}
+
 export function registerChatHandlers(io) {
   io.on('connection', async (socket) => {
     const { user } = socket.data;
@@ -191,26 +236,50 @@ export function registerChatHandlers(io) {
       select: { avatarUrl: true, alias: true },
     });
     addPresence({ ...user, avatarUrl: dbUser?.avatarUrl ?? null, alias: dbUser?.alias ?? null });
-    socket.join(GLOBAL_ROOM_NAME);
     socket.join(`user:${user.id}`);
     broadcastPresence(io);
     console.log(`[chat] conectado ${user.username} (online: ${online.size})`);
 
-    // Historia de la sala global: ultimos N, en orden cronologico ascendente.
+    // Al conectar: el socket entra a la global y a TODAS las salas donde es
+    // miembro (asi recibe mensajes en vivo, y el cliente cuenta no leidos,
+    // aunque no tenga esa sala abierta). Ademas manda la lista de salas y la
+    // historia de la global.
     try {
-      const roomId = await getGlobalRoomId();
+      const globalId = await getGlobalRoomId();
+      socket.join(socketRoom(globalId));
+
+      const memberships = await prisma.roomMember.findMany({
+        where: { userId: user.id },
+        include: { room: true },
+      });
+      for (const m of memberships) socket.join(socketRoom(m.roomId));
+
+      // Lista para el sidebar: todas las publicas + las privadas propias.
+      const joinedIds = new Set(memberships.map((m) => m.roomId));
+      const publicRooms = await prisma.room.findMany({
+        where: { isPrivate: false, name: { not: GLOBAL_ROOM_NAME } },
+        orderBy: { createdAt: 'asc' },
+      });
+      const rooms = publicRooms.map((r) => toClientRoom(r, joinedIds.has(r.id)));
+      for (const m of memberships) {
+        if (m.room.isPrivate) rooms.push(toClientRoom(m.room, true));
+      }
+      socket.emit('rooms:list', rooms);
+
+      // Historia de la sala global: ultimos N, en orden cronologico ascendente.
       const history = await prisma.message.findMany({
-        where: { roomId },
+        where: { roomId: globalId },
         orderBy: { createdAt: 'desc' },
         take: MESSAGE_HISTORY_LIMIT,
         include: MESSAGE_INCLUDE,
       });
       socket.emit('room:history', {
         room: GLOBAL_ROOM_NAME,
+        roomId: globalId,
         messages: history.reverse().map(toClientMessage),
       });
     } catch (err) {
-      console.error('Error cargando historia global:', err.message);
+      console.error('Error inicializando salas:', err.message);
     }
 
     // Conversaciones DM existentes, para pintar el sidebar al entrar.
@@ -220,17 +289,27 @@ export function registerChatHandlers(io) {
       console.error('Error cargando conversaciones DM:', err.message);
     }
 
-    // Mensaje a la sala global. El payload del socket es input no confiable:
-    // se valida y recorta antes de tocar la DB.
+    // Mensaje a una sala (global si no viene roomId). El payload del socket
+    // es input no confiable: se valida y recorta antes de tocar la DB.
     socket.on('room:message', async (payload, ack) => {
       const content = typeof payload?.content === 'string' ? payload.content.trim() : '';
       if (!content) return ack?.({ error: 'Mensaje vacio.' });
       if (content.length > MAX_MESSAGE_LENGTH) {
         return ack?.({ error: 'Mensaje demasiado largo.' });
       }
+      const requestedRoomId = typeof payload?.roomId === 'string' ? payload.roomId : null;
       const replyToId = typeof payload?.replyToId === 'string' ? payload.replyToId : null;
       try {
-        const roomId = await getGlobalRoomId();
+        const globalId = await getGlobalRoomId();
+        const roomId = requestedRoomId ?? globalId;
+        // Limite de confianza: en cualquier sala que no sea la global hay
+        // que ser miembro para escribir.
+        if (roomId !== globalId) {
+          const member = await prisma.roomMember.findUnique({
+            where: { userId_roomId: { userId: user.id, roomId } },
+          });
+          if (!member) return ack?.({ error: 'No eres miembro de esta sala.' });
+        }
         // El replyToId es input no confiable: solo se acepta si el mensaje
         // citado existe y pertenece a esta misma sala.
         let validReplyToId = null;
@@ -245,7 +324,7 @@ export function registerChatHandlers(io) {
           data: { content, senderId: user.id, roomId, replyToId: validReplyToId },
           include: MESSAGE_INCLUDE,
         });
-        io.to(GLOBAL_ROOM_NAME).emit('room:message', toClientMessage(msg));
+        io.to(socketRoom(roomId)).emit('room:message', toClientMessage(msg));
         ack?.({ ok: true });
       } catch (err) {
         console.error('Error guardando mensaje:', err.message);
@@ -261,18 +340,119 @@ export function registerChatHandlers(io) {
       try {
         const msg = await prisma.message.findUnique({
           where: { id },
-          select: { id: true, senderId: true },
+          select: { id: true, senderId: true, roomId: true },
         });
-        if (!msg) return ack?.({ error: 'El mensaje no existe.' });
+        // Debe ser un mensaje de sala (los DM se borran por su propio evento).
+        if (!msg || !msg.roomId) return ack?.({ error: 'El mensaje no existe.' });
         if (msg.senderId !== user.id) {
           return ack?.({ error: 'No podes borrar este mensaje.' });
         }
         await prisma.message.delete({ where: { id } });
-        io.to(GLOBAL_ROOM_NAME).emit('room:message:deleted', { id });
+        io.to(socketRoom(msg.roomId)).emit('room:message:deleted', { id });
         ack?.({ ok: true });
       } catch (err) {
         console.error('Error borrando mensaje:', err.message);
         ack?.({ error: 'No se pudo borrar el mensaje.' });
+      }
+    });
+
+    // Crear una sala. El creador queda como miembro y entra de una. Toda
+    // sala nueva recibe codigo de invitacion (publicas y privadas).
+    socket.on('room:create', async (payload, ack) => {
+      const res = normalizeRoomName(payload?.name);
+      if (res.error) return ack?.({ error: res.error });
+      const isPrivate = Boolean(payload?.isPrivate);
+      try {
+        const room = await prisma.room.create({
+          data: {
+            name: res.name,
+            createdBy: user.id,
+            isPrivate,
+            inviteCode: newInviteCode(),
+            members: { create: { userId: user.id } },
+          },
+        });
+        io.in(`user:${user.id}`).socketsJoin(socketRoom(room.id));
+        // Las publicas se anuncian a todos (salen en "explorar salas"); las
+        // privadas solo existen para sus miembros.
+        if (!room.isPrivate) {
+          socket.broadcast.emit('room:created', toClientRoom(room, false));
+        }
+        ack?.({ room: toClientRoom(room, true) });
+      } catch (err) {
+        if (err.code === 'P2002') {
+          return ack?.({ error: 'Ya existe una sala con ese nombre.' });
+        }
+        console.error('Error creando sala:', err.message);
+        ack?.({ error: 'No se pudo crear la sala.' });
+      }
+    });
+
+    // Unirse a una sala: por id (solo publicas) o por codigo de invitacion
+    // (cualquiera; es la unica puerta de entrada a una privada).
+    socket.on('room:join', async (payload, ack) => {
+      const roomId = typeof payload?.roomId === 'string' ? payload.roomId : null;
+      const code = typeof payload?.code === 'string' ? payload.code.trim() : null;
+      try {
+        let room = null;
+        if (code) {
+          room = await prisma.room.findUnique({ where: { inviteCode: code } });
+        } else if (roomId) {
+          room = await prisma.room.findUnique({ where: { id: roomId } });
+          if (room?.isPrivate) room = null;
+        }
+        if (!room || room.name === GLOBAL_ROOM_NAME) {
+          return ack?.({ error: code ? 'Codigo invalido.' : 'La sala no existe.' });
+        }
+        // Idempotente: unirse dos veces no duplica la membresia.
+        await prisma.roomMember.upsert({
+          where: { userId_roomId: { userId: user.id, roomId: room.id } },
+          create: { userId: user.id, roomId: room.id },
+          update: {},
+        });
+        // Todas las pestañas del usuario empiezan a recibir la sala en vivo.
+        io.in(`user:${user.id}`).socketsJoin(socketRoom(room.id));
+        ack?.({ room: toClientRoom(room, true) });
+      } catch (err) {
+        console.error('Error uniendose a sala:', err.message);
+        ack?.({ error: 'No se pudo unir a la sala.' });
+      }
+    });
+
+    // Salir de una sala. La sala sigue existiendo (sin dueño efectivo).
+    socket.on('room:leave', async (payload, ack) => {
+      const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
+      if (!roomId) return ack?.({ error: 'Falta la sala.' });
+      try {
+        await prisma.roomMember.deleteMany({ where: { userId: user.id, roomId } });
+        io.in(`user:${user.id}`).socketsLeave(socketRoom(roomId));
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('Error saliendo de sala:', err.message);
+        ack?.({ error: 'No se pudo salir de la sala.' });
+      }
+    });
+
+    // Historial de una sala (lo pide el cliente al abrirla). Solo miembros;
+    // la global no pasa por aca (llega sola al conectar).
+    socket.on('room:history', async (payload, ack) => {
+      const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
+      if (!roomId) return ack?.({ error: 'Falta la sala.' });
+      try {
+        const member = await prisma.roomMember.findUnique({
+          where: { userId_roomId: { userId: user.id, roomId } },
+        });
+        if (!member) return ack?.({ error: 'No eres miembro de esta sala.' });
+        const history = await prisma.message.findMany({
+          where: { roomId },
+          orderBy: { createdAt: 'desc' },
+          take: MESSAGE_HISTORY_LIMIT,
+          include: MESSAGE_INCLUDE,
+        });
+        ack?.({ messages: history.reverse().map(toClientMessage) });
+      } catch (err) {
+        console.error('Error cargando historia de sala:', err.message);
+        ack?.({ error: 'No se pudo cargar la sala.' });
       }
     });
 
