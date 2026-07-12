@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 process.env.DATABASE_URL = 'postgresql://test';
 
-const { isVisibleTo } = await import('./chat.js');
+const { isVisibleTo, mergeDmPartners } = await import('./chat.js');
 
 // Online/dnd: visibles para cualquiera.
 assert.equal(isVisibleTo({ status: 'online', userId: 'u1' }, 'u2'), true);
@@ -14,5 +14,29 @@ assert.equal(isVisibleTo({ status: 'invisible', userId: 'u1' }, 'u2'), false);
 
 // Invisible: SI visible para si mismo.
 assert.equal(isVisibleTo({ status: 'invisible', userId: 'u1' }, 'u1'), true);
+
+// mergeDmPartners: une enviados y recibidos quedandose con la fecha mas
+// reciente por partner, sin importar la direccion.
+const d1 = new Date('2026-07-01T10:00:00Z');
+const d2 = new Date('2026-07-02T10:00:00Z');
+const d3 = new Date('2026-07-03T10:00:00Z');
+
+const merged = mergeDmPartners(
+  [
+    { recipientId: 'ana', _max: { createdAt: d1 } },
+    { recipientId: 'beto', _max: { createdAt: d3 } },
+  ],
+  [
+    { senderId: 'ana', _max: { createdAt: d2 } }, // mas reciente que lo enviado
+    { senderId: 'caro', _max: { createdAt: d1 } }, // solo recibido
+  ],
+);
+assert.equal(merged.size, 3);
+assert.equal(merged.get('ana'), d2); // gana la direccion mas reciente
+assert.equal(merged.get('beto'), d3); // solo enviado
+assert.equal(merged.get('caro'), d1); // solo recibido
+
+// Sin DMs: mapa vacio.
+assert.equal(mergeDmPartners([], []).size, 0);
 
 console.log('chat.test OK');
