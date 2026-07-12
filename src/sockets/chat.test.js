@@ -5,7 +5,7 @@ process.env.DATABASE_URL = 'postgresql://test';
 // chat.js ahora importa env.js (para validar imageUrl), que exige JWT_SECRET.
 process.env.JWT_SECRET = 'test';
 
-const { isVisibleTo, mergeDmPartners, normalizeRoomName } = await import('./chat.js');
+const { isVisibleTo, mergeDmPartners, normalizeRoomName, summarizeReactions } = await import('./chat.js');
 
 // Online/dnd: visibles para cualquiera.
 assert.equal(isVisibleTo({ status: 'online', userId: 'u1' }, 'u2'), true);
@@ -51,5 +51,18 @@ assert.ok(normalizeRoomName('con ñ').error); // charset invalido
 assert.ok(normalizeRoomName('global').error); // reservado
 assert.ok(normalizeRoomName(undefined).error); // input basura
 assert.ok(normalizeRoomName('sala!').error); // simbolos
+
+// summarizeReactions: agrupa por emoji en el orden de la paleta.
+const rows = [
+  { userId: 'u2', emoji: '\u{1F525}' },
+  { userId: 'u1', emoji: '\u{1F44D}' },
+  { userId: 'u3', emoji: '\u{1F44D}' },
+];
+const summary = summarizeReactions(rows);
+assert.equal(summary.length, 2);
+assert.equal(summary[0].emoji, '\u{1F44D}'); // orden de paleta, no de llegada
+assert.deepEqual(summary[0].userIds, ['u1', 'u3']);
+assert.deepEqual(summary[1].userIds, ['u2']);
+assert.deepEqual(summarizeReactions([]), []);
 
 console.log('chat.test OK');
