@@ -212,6 +212,14 @@ function isSameDmPair(msg, a, b) {
   );
 }
 
+// Cursor de paginacion de historial: fecha limite superior (exclusiva) que
+// manda el cliente para pedir mensajes mas viejos. Input no confiable.
+function parseBefore(payload) {
+  if (typeof payload?.before !== 'string') return null;
+  const d = new Date(payload.before);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 // Nombre de la room de Socket.IO para una sala de la DB.
 function socketRoom(roomId) {
   return `room:${roomId}`;
@@ -502,13 +510,17 @@ export function registerChatHandlers(io) {
     socket.on('room:history', async (payload, ack) => {
       const roomId = typeof payload?.roomId === 'string' ? payload.roomId : '';
       if (!roomId) return ack?.({ error: 'Falta la sala.' });
+      const before = parseBefore(payload);
       try {
-        const member = await prisma.roomMember.findUnique({
-          where: { userId_roomId: { userId: user.id, roomId } },
-        });
-        if (!member) return ack?.({ error: 'No eres miembro de esta sala.' });
+        // La global es de todos; el resto exige membresia.
+        if (roomId !== (await getGlobalRoomId())) {
+          const member = await prisma.roomMember.findUnique({
+            where: { userId_roomId: { userId: user.id, roomId } },
+          });
+          if (!member) return ack?.({ error: 'No eres miembro de esta sala.' });
+        }
         const history = await prisma.message.findMany({
-          where: { roomId },
+          where: { roomId, ...(before ? { createdAt: { lt: before } } : {}) },
           orderBy: { createdAt: 'desc' },
           take: MESSAGE_HISTORY_LIMIT,
           include: MESSAGE_INCLUDE,
@@ -525,6 +537,7 @@ export function registerChatHandlers(io) {
     socket.on('dm:history', async (payload, ack) => {
       const withUserId = typeof payload?.withUserId === 'string' ? payload.withUserId : '';
       if (!withUserId) return ack?.({ error: 'Falta el usuario.' });
+      const before = parseBefore(payload);
       try {
         const history = await prisma.message.findMany({
           where: {
@@ -532,6 +545,7 @@ export function registerChatHandlers(io) {
               { senderId: user.id, recipientId: withUserId },
               { senderId: withUserId, recipientId: user.id },
             ],
+            ...(before ? { createdAt: { lt: before } } : {}),
           },
           orderBy: { createdAt: 'desc' },
           take: MESSAGE_HISTORY_LIMIT,
