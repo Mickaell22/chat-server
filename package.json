@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
+    "test": "for f in $(find src -name '*.test.js' | sort); do echo \"== $f ==\"; node \"$f\" || exit 1; done",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
