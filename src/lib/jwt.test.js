@@ -17,7 +17,7 @@ const {
 const token = signToken({ id: 'u1', username: 'mickaell' });
 const payload = verifyToken(token);
 assert.equal(payload.sub, 'u1');
-assert.equal(payload.username, 'mickaell');
+assert.equal(payload.username, 'otro');
 
 assert.throws(() => verifyToken('token.basura.invalido'));
 
