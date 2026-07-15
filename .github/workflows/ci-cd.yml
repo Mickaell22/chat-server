@@ -1,0 +1,77 @@
+# Flujo CI/CD del backend (chat-server).
+# CI: en cada push/PR a main corre los self-checks del proyecto.
+# CD: si es push a main y las pruebas pasan, despliega a Railway y
+#     verifica el endpoint /health en produccion.
+#
+# Requiere configurar en GitHub (Settings del repo):
+#   - Secret  RAILWAY_TOKEN    -> token de proyecto de Railway (project token)
+#   - Variable HEALTHCHECK_URL -> URL publica del /health del server
+
+name: CI/CD chat-server
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Pruebas unitarias
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Generar cliente de Prisma
+        run: npx prisma generate
+
+      - name: Ejecutar self-checks
+        run: npm test
+
+  deploy:
+    name: Deploy a Railway
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.HEALTHCHECK_URL }}
+    steps:
+      - name: Checkout del codigo
+        uses: actions/checkout@v4
+
+      - name: Instalar Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Desplegar servicio chat-server
+        run: railway up --service chat-server --ci
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  healthcheck:
+    name: Verificacion post-deploy
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Esperar respuesta de /health
+        run: |
+          curl --fail --silent --show-error \
+            --retry 12 --retry-delay 10 --retry-all-errors \
+            "${{ vars.HEALTHCHECK_URL }}"
+          echo ""
+          echo "Servidor en produccion respondiendo OK"

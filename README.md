@@ -15,6 +15,7 @@ mensajería instantánea con salas múltiples y mensajes privados.
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
 ![JWT](https://img.shields.io/badge/JWT-Auth-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)
 ![Railway](https://img.shields.io/badge/Railway-Deploy-0B0D0E?style=for-the-badge&logo=railway&logoColor=white)
+![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-CI%2FCD-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
 
 </div>
 
@@ -35,6 +36,7 @@ mensajería instantánea con salas múltiples y mensajes privados.
 - [API HTTP](#api-http)
 - [Eventos de WebSocket](#eventos-de-websocket)
 - [Despliegue en Railway](#despliegue-en-railway)
+- [CI/CD](#cicd)
 - [Cliente](#cliente)
 
 ---
@@ -296,7 +298,8 @@ que está vivo.
 ## Despliegue en Railway
 
 Desplegado en el proyecto **chat-tiempo-real**, servicio **chat-server**
-(linkeado al repo de GitHub: cada push a `main` dispara redeploy automático):
+(el despliegue lo orquesta GitHub Actions: cada push a `main` corre las
+pruebas y, si pasan, despliega — ver [CI/CD](#cicd)):
 
 **https://chat-server-production-fcc5.up.railway.app**
 
@@ -314,6 +317,38 @@ Pasos seguidos:
    ```
 5. Comando de inicio: `npm start` (definido en `package.json`).
 6. Dominio público generado con `railway domain`.
+
+---
+
+## CI/CD
+
+[![CI/CD chat-server](https://github.com/Mickaell22/chat-server/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Mickaell22/chat-server/actions/workflows/ci-cd.yml)
+
+El proyecto tiene dos flujos de integración y despliegue continuo:
+
+### GitHub Actions (`.github/workflows/ci-cd.yml`)
+
+Pipeline de tres etapas encadenadas:
+
+1. **Pruebas unitarias** — en cada push y PR a `main`: `npm ci`,
+   `prisma generate` y `npm test` (self-checks de Node, sin frameworks).
+2. **Deploy a Railway** — solo en push a `main` y si las pruebas pasan:
+   `railway up --service chat-server` con la CLI oficial de Railway.
+3. **Verificación post-deploy** — `curl` con reintentos al endpoint
+   `/health` de producción; el pipeline falla si el server no responde.
+
+Configuración requerida en GitHub (Settings del repo):
+
+| Tipo | Nombre | Contenido |
+| --- | --- | --- |
+| Secret (Actions) | `RAILWAY_TOKEN` | Token de proyecto de Railway |
+| Variable (Actions) | `HEALTHCHECK_URL` | URL pública del `/health` del server |
+
+### Jenkins (rama `ci/docker-jenkins`)
+
+Flujo alternativo autoalojado sobre Docker: build de imágenes de backend y
+frontend, pruebas dentro del contenedor, deploy a staging, aprobación manual
+y promoción a producción (`Jenkinsfile` + `docker-compose.deploy.yml`).
 
 ---
 
